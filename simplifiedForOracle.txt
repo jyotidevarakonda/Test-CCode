@@ -1,0 +1,31 @@
+SELECT ROWNUM, TIN, TINFS, TINTT, GM_ID
+FROM E_VIEW
+WHERE (
+  (
+    STATUS = 'Q' AND PROID BETWEEN 123456789 AND 123456888
+    OR STATUS = 'O' AND ROID = 123456789
+    AND X = 'Y'
+  )
+  AND 0 < (
+    SELECT /*+ index(assn assn_tin_ix) */ COUNT(*)
+    FROM ASSN
+    WHERE ASSN.TIN = E_VIEW.TIN
+      AND ASSN.FS = E_VIEW.TINFS
+      AND ASSN.TT = E_VIEW.TINTT
+      AND QPICKIND IN (1,2,3)
+      AND (AREA = 123 AND TERRITORY = 45
+           AND Z = 42)
+      AND GRNUM = 67
+  )
+)
+ORDER BY TIN
+
+
+IVIEW_FIELDS = "TIN, TINFS, TINTT,"
+GM_FIELDS = "GM_ID,"
+G_EVIEW = "E_VIEW"
+iStart = 123456789
+IclauseSql = "AND X = 'Y'"
+w->qpickStr = "1,2,3"
+IclauseAssnSql = "AND Z = 42"
+sortSql = "TIN"

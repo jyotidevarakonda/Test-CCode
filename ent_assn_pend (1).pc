@@ -1,0 +1,872 @@
+/* *****************************************************************************
+File Name  : ent_assn_pend.pc
+Project    : ENTITY
+Maintenance: ALE staff
+DESCRIPTION: Case Assignment (Gmassn program). In CASE WIZARD screen pressing
+F4-PEND or F9-HOLD/SKIPDATE lauches this popupPENDScreen() function to display
+all pending cases (F4-PEND) OR all hold cases (F9-HOLD/SKIPDATE).
+*
+* Compile: See ClearCase makefiles.
+* ClearCase:
+  Directory: /cm_1/als/entity/d.user_interface/libent
+ Header file: entity.h
+  Directory : /cm_1/als/entity/d.user_interface/def
+ Library: libent.a
+  Directory: /cm_1/als/entity/d.user_interface/libent
+       Library libent.a is created with compile of entity.pc (entity.exe) and
+       deleted on cleanup.
+*
+* Environment variable used:
+*
+* Note:
+ent_label() function is a define in widget.c as
+        MACRO to use ent_scroll for calls to both SCROLL and LABEL.
+        #define ent_label(w,s)   ent_scroll(w,s,0)
+*
+* Dates    Developer   -------- History of Modifications -------------
+04/09/2016 S.Kraft     getPendData() Index tin_ix is now assn_tin_ix.
+05/14/2016 S.Kraft     SP#87, fillPENDScroll(), added arank.
+               getPendData(), order by clause have ARANK, MODELRANK desc.
+               sortCB(), using qsort_gmCase().
+               createAllWidgets(), w->pendScrl->width = 79; was 78.
+05/14/2016 S.Kraft     SP#118, fillPENDScroll() Replace RISK text with PRTY.
+* *************************************************************************** */
+EXEC SQL INCLUDE SQLCA;
+
+#include "../def/entity.h"
+
+typedef struct
+{
+   int    *screenNum;
+   WINDOW *entscreen;
+   WINDOW *parentScreen;
+   WINDOW *grandParentScreen;
+   int    *exitENTscreen;
+   int    *widgetNum;
+   int    *widgetActive;
+   WIDGET *recLbl;
+   WIDGET *headLbl;
+   WIDGET *currRoLbl;
+   WIDGET *pendLbl;
+   WIDGET *pendScrl;
+   WIDGET *actLbl;
+   int scrlHeight;
+   viewModes viewState;   /* A flag to keep track of VIEW states */
+   char *picktype;    /* to determine if PENDING or HOLD/SKIP */
+   char qpickStr[4]; /* to hold strings "1,2" or "3,4" */
+   ENTREC *pendRec;
+   int pendNum;
+   ENTREC *acclRec;
+   int acclNum;
+   ROREC *roRec;
+   int roNum;
+}PENDDATA;
+
+int registerCB16(void *clientData, int input, int CBnum)
+{
+/*  registerCBXX function is NOT static so that                             */
+/*    the global traverseENTscreen function can see it                      */
+/* The naming of the XX of this function should correspond to the screenNum */
+/* which is unique to this screen file                                      */
+   PENDDATA *w = ( PENDDATA * ) clientData;
+
+/* CB defs - be sure to duplicate in the initial screen function at bottom */
+/* A corresponding int should be created for each CB function used         */
+   int helpCBnum  = 10001;
+   int escCBnum   = 10002;
+   int viewCBnum  = 10003;
+   int sortCBnum  = 10004;
+   int printCBnum = 10005;
+   int enterCBnum = 10006;
+
+/* A pair of lines should be created for each CB function used */
+   if ( CBnum ==  helpCBnum )
+       return     helpCB        (w->entscreen);
+   if ( CBnum ==   escCBnum )
+       return      escCB        (w,input);
+   if ( CBnum ==  viewCBnum )
+       return     viewCB        (w,input);
+   if ( CBnum ==  sortCBnum )
+       return     sortCB        (w,input);
+   if ( CBnum == printCBnum )
+       return    printCB        (w,input);
+   if ( CBnum == enterCBnum )
+       return    enterCB        (w,input);
+}
+
+static int cleanup(TRAVERSE *w)
+{
+/* This is the basic cleanup, but may be customized if needed for each screen */
+   traverseENTcleanup(w);
+}
+
+static int escCB(PENDDATA *w,int input)
+{
+   *w->exitENTscreen = 1;
+   return (TRUE);
+}
+
+static void
+getPendData(PENDDATA *w)
+{
+   ENTREC *entPtr;
+   ENTREC *entData = NULL;
+   ENTREC  entBuff;
+
+   INVFETCH *gmPtr;
+   INVFETCH *gmData = NULL;
+   INVFETCH  gmBuff;
+
+   /*
+    * These unsigns are just left over during of course of the compiler flag
+    *  -xmemalign=8i. Should be OK to change back to ints.
+    */
+   int newcurrRec;
+   unsigned currRec;
+   unsigned allocedRec;
+   unsigned recsToAlloc;
+   int  iStart,  iTemp;
+   char dynamicSql[10240];
+   char IclauseSql[256] = "";
+   char IclauseAssnSql[256] = "";
+   char sortSql[256];
+
+   WINDOW *statusWin;
+   WIDGET statusLbl;
+   char *statusMsg[1] = {
+"                                                                                " };
+
+   statusLbl.type       = ENT_LABEL;
+   statusLbl.y_pos      =  0;
+   statusLbl.x_pos      =  0;
+   statusLbl.height     =  4;
+   statusLbl.width      = 78;
+   statusLbl.outlinebox =  1;
+   statusLbl.shadowbox  =  1;
+   statusLbl.headingNum =  0;
+   statusLbl.heading    =  0;
+   statusLbl.dataNum    =  1;
+   statusLbl.data       =  0;
+   statusLbl.curr_rec   =  0;
+   statusLbl.top_rec    =  0;
+   statusLbl.active     =  1;
+
+   statusWin = newwin(4,78,13,1);
+
+   ent_sprintf(statusMsg[0]," ACCESSING %s CASE DATA. PLEASE WAIT ... ",
+                                    w->picktype);
+   setENTdataItems(&statusLbl,statusMsg);
+   ent_label(&statusLbl,statusWin);
+   refreshENTscreen(statusWin);
+   sleep(1);
+
+   if(w->pendRec)
+   {
+      free(w->pendRec);
+      w->pendRec = 0;
+   }
+
+   /* Prepare ROID range */
+   iStart = (atoi(G_ROID)/100)*100;
+
+   if(G_INTERNATIONAL[0] == 'Y')
+   {
+      ent_sprintf(IclauseSql, "%s%s%s%s",
+      "                  ",
+      "OR STATUS = 'Q' AND PROID = 35000000 AND ZIPCDE = 00000 \n ",
+      "                  ",
+      "OR STATUS = 'Q' AND PROID = 35000000 AND CITY IN ('APO', 'DPO', 'FPO')\n");
+
+       ent_sprintf(IclauseAssnSql,
+       "                          OR     AREA      = 35 \n"
+       "                             AND TERRITORY = 02 \n");
+   }  /* end if(G_INTERNATIONAL[0] == 'Y') */
+
+/* ORDER BY CLAUSE, want ARANK, MODELRANK desc */
+   if(strcmp("NVL(RISK,399", KEY_ARRAY[G_ENT_SORT_INDEX].fldname) == 0 )
+      ent_sprintf(sortSql, "ARANK, MODELRANK desc");
+   else if(strcmp("CITY", KEY_ARRAY[G_ENT_SORT_INDEX].fldname) == 0 )
+      ent_sprintf(sortSql, "LTRIM(%s), ARANK, MODELRANK desc", KEY_ARRAY[G_ENT_SORT_INDEX].fldname);
+   else ent_sprintf(sortSql, "%s, ARANK, MODELRANK desc", KEY_ARRAY[G_ENT_SORT_INDEX].fldname);
+entSyslog("ent_assn_pend.pc:getPendData(), KEY_ARRAY[G_ENT_SORT_INDEX].fldname =>%s<",
+KEY_ARRAY[G_ENT_SORT_INDEX].fldname);
+
+   if(strcmp(w->picktype, "SELECTED/PENDING") == 0 )
+      entcpy(w->qpickStr, "3,4");
+   else if(strcmp(w->picktype, "HOLD/SKIPDATE"  ) == 0 )
+      entcpy(w->qpickStr, "1,2");
+
+   ent_sprintf(dynamicSql, "SELECT ROWNUM, %s %s\nFROM %s \n"
+      "WHERE ( (STATUS = 'Q' AND PROID BETWEEN %d AND %d \n"
+      "         OR STATUS = 'O' AND ROID = %d \n"
+      "         %s) \n"
+      "       AND 0 < (SELECT /*+ index(assn assn_tin_ix) */ \n"
+      "                 count(*) \n"
+      "           FROM ASSN \n"
+      "           WHERE ASSN.TIN = %s.TIN   \n"
+      "            AND ASSN.FS   = %s.TINFS \n"
+      "            AND ASSN.TT   = %s.TINTT \n"
+      "            AND QPICKIND in (%s) \n"
+      "            AND (AREA = %d AND TERRITORY = %d \n"
+      "                 %s) \n"
+      "            AND GRNUM = %d) ) \n"
+      "ORDER BY %s",
+   IVIEW_FIELDS,
+   GM_FIELDS,
+   G_EVIEW,
+   iStart, iStart+99,
+   iStart,
+   IclauseSql,
+   G_EVIEW, G_EVIEW, G_EVIEW,
+   w->qpickStr,
+   iStart/1000000,
+   (iStart/10000) % 100,
+   IclauseAssnSql,
+   (iStart/100) % 100,
+   sortSql
+   );
+
+   currRec = 0;
+   allocedRec = 0;
+   recsToAlloc = 2;
+
+/*
+entSyslog("911 PENDING or HOLD/SKIPDATE, ent_assn_pend.pc:getPendData(). dynamicSql =\n>%s<", dynamicSql);
+*/
+
+   EXEC SQL WHENEVER NOTFOUND DO sqlError(w->entscreen);
+   EXEC SQL PREPARE SEARCH_PREP FROM :dynamicSql;
+   EXEC SQL DECLARE SEARCH_CUR CURSOR FOR SEARCH_PREP;
+   EXEC SQL OPEN SEARCH_CUR;
+   while ( 1 )
+      {
+       EXEC SQL WHENEVER NOTFOUND DO break;
+       memset( &gmBuff , 0, sizeof(INVFETCH) );
+       memset( &entBuff, 0, sizeof(ENTREC ) );
+       EXEC SQL FETCH SEARCH_CUR into :gmBuff;
+
+       if ( currRec >= allocedRec )
+          {
+           grow((void **)&gmData,  allocedRec, recsToAlloc, sizeof(INVFETCH) );
+           grow((void **)&entData, allocedRec, recsToAlloc, sizeof(ENTREC ) );
+           allocedRec += recsToAlloc;
+          }
+       memmove( gmData+currRec, &gmBuff, sizeof(INVFETCH) );
+       currRec++;
+      }
+   ent_sprintf(statusMsg[0], " RETRIEVING DATA. %d ... ", currRec );
+   setENTdataItems(&statusLbl,statusMsg);
+   ent_label(&statusLbl,statusWin);
+   refreshENTscreen(statusWin);
+   sleep(1);
+   if ( statusLbl.data ) { free(statusLbl.data); statusLbl.data=0; }
+   delwin(statusWin);
+
+   entPtr = entData;
+    gmPtr =  gmData;
+
+   if ( currRec > 0 )
+      {
+       newcurrRec = common_struct_copy("GM",
+                         entPtr,(char *)gmPtr,currRec);
+                                  free( gmData );
+       if ( newcurrRec != currRec )
+          {
+           entSyslog("ERROR : RECORD NUM MISMATCH!!");
+           entSyslog("   currRec = %d",    currRec);
+           entSyslog("newcurrRec = %d", newcurrRec);
+          }
+       currRec = newcurrRec;
+      }
+   EXEC SQL WHENEVER SQLERROR DO sqlError(w->entscreen);
+   EXEC SQL WHENEVER NOTFOUND DO sqlError(w->entscreen);
+   EXEC SQL CLOSE SEARCH_CUR;
+   w->pendNum = currRec;
+   w->pendRec = entData;
+}
+
+static int printCB(PENDDATA *w,int input)
+{
+   printHandler(w->entscreen,w->headLbl,w->pendLbl,w->pendScrl,0,0,1,0,0,0,0,0);
+   return (TRUE);
+}
+
+static int viewCB(PENDDATA *w,int input)
+{
+   int top;
+   int curr;
+
+   top  = w->pendScrl->top_rec;
+   curr = w->pendScrl->curr_rec;
+   if ( w->viewState       == VIEWING_BAL )
+        w->viewState        = VIEWING_TIN;
+   else  if ( w->viewState == VIEWING_TIN )
+               w->viewState = VIEWING_BAL;
+   fillPENDScroll(w);
+   w->pendScrl->top_rec  = top;
+   w->pendScrl->curr_rec = curr;
+   ent_scroll(w->pendScrl,w->entscreen,0);
+   return (TRUE);
+}
+
+
+static int
+sortCB(PENDDATA *w, int input)
+{
+   int pickSortIdx;
+
+/*
+entSyslog("ent_assn_pend.pc:sortCB() start, orig G_ENT_SORT_INDEX>%d< sort field >%s<",
+G_ENT_SORT_INDEX, KEY_ARRAY[G_ENT_SORT_INDEX].flddesc);
+*/
+   pickSortIdx = G_ENT_SORT_INDEX;
+   pickSortIdx = popupSORTScreen(pickSortIdx);
+/*
+entSyslog("ent_assn_pend.pc:sortCB() sort index after popupSORTscreen() >%d< sort field >%s<",
+pickSortIdx, KEY_ARRAY[pickSortIdx].flddesc);
+*/
+
+   if(pickSortIdx != G_ENT_SORT_INDEX)
+   {
+      w->pendScrl->curr_rec = 0;
+      w->pendScrl->top_rec = 0;
+      G_ENT_SORT_INDEX = pickSortIdx;
+
+      /* qsort_ent function is based on value of G_ENT_SORT_INDEX */
+      qsort( (void *)w->pendRec, w->pendNum, sizeof(ENTREC), qsort_gmCase);
+
+      /* FORCE VIEW TOGGLE if a TOGGLE field is the SORT FIELD */
+      if((strcmp(KEY_ARRAY[G_ENT_SORT_INDEX].fldname, "TIN") == 0)
+          && w->viewState == VIEWING_BAL )
+         w->viewState = VIEWING_TIN;
+
+       if((strcmp(KEY_ARRAY[G_ENT_SORT_INDEX].fldname, "TOTASSD") == 0)
+           && w->viewState == VIEWING_TIN)
+          w->viewState = VIEWING_BAL;
+
+       fillPENDScroll(w);
+   }  /* end if(pickSortIdx != G_ENT_SORT_INDEX) */
+   return (TRUE);
+}  /* end sortCB() */
+
+
+static int enterCB(PENDDATA *w,int input)
+{
+   int i, j;
+   int currRoPos;
+   ACT_TYPE actMode;
+   char singleCase[2];
+   char subType[5];
+   int oldQpickind;
+   char oldQskipdt[10+1];
+   int exitNum = -1;
+
+   int curr;
+   int subNum = 0;
+   int *subIdx = 0;
+
+   curr = w->pendScrl->curr_rec;
+
+   if ( w->pendNum == 0 )
+      return (TRUE);
+
+   oldQpickind = atoi(w->pendRec[curr].qpickind);
+   entcpy(oldQskipdt, w->pendRec[curr].skipdt);
+
+   subNum = buildSubIdx(w->pendRec, w->pendNum, &subIdx);
+
+/* actMode copied from auto */
+       if ( atoi(w->pendRec[curr].qpickind) == QPICK_NONE )
+          {
+           actMode = ACT_PICKABLE;
+           /* will be changed to ACT_ACCL_PICKABLE if is a ACCL */
+           for (i= 0; i < w->acclNum; i++)
+              {
+               if (    !strcmp(w->pendRec[curr].tin    , w->acclRec[i].tin    )
+                    && !strcmp(w->pendRec[curr].tinfs  , w->acclRec[i].tinfs  )
+                    && !strcmp(w->pendRec[curr].tintt  , w->acclRec[i].tintt  )
+                    && !strcmp(w->pendRec[curr].tinsid , w->acclRec[i].tinsid )
+                    && !strcmp(w->pendRec[curr].caseind, w->acclRec[i].caseind)
+                    && !strcmp(w->pendRec[curr].status , w->acclRec[i].status )
+                  )
+                  {
+/* entSyslog("CHANGED TO ACT_ACCL_PICKABLE"); */
+                   actMode = ACT_ACCL_PICKABLE;
+                   break;
+                  }
+              }
+         }
+      else if  ( atoi(w->pendRec[curr].qpickind) == QPICK_SELECTED )
+         {
+          actMode = ACT_UNPICKABLE;
+          /* will be changed to ACT_ACCL_READONLY if is a ACCL */
+          for (i= 0; i < w->acclNum; i++)
+             {
+              if (    !strcmp(w->pendRec[curr].tin    , w->acclRec[i].tin    )
+                   && !strcmp(w->pendRec[curr].tinfs  , w->acclRec[i].tinfs  )
+                   && !strcmp(w->pendRec[curr].tintt  , w->acclRec[i].tintt  )
+                   && !strcmp(w->pendRec[curr].tinsid , w->acclRec[i].tinsid )
+                   && !strcmp(w->pendRec[curr].caseind, w->acclRec[i].caseind)
+                   && !strcmp(w->pendRec[curr].status , w->acclRec[i].status )
+                 )
+                 {
+/* entSyslog("CHANGED TO ACT_ACCL_READONLY"); */
+                  actMode = ACT_ACCL_READONLY;
+                  break;
+                 }
+             }
+         }
+      else if  (    atoi(w->pendRec[curr].qpickind) == QPICK_HOLD
+                 || atoi(w->pendRec[curr].qpickind) == QPICK_SKIPDATE
+               )
+         {
+          actMode = ACT_QCTRLABLE;
+         }
+      else if ( atoi(w->pendRec[curr].qpickind) == QPICK_PENDING )
+         {
+          actMode = ACT_READONLY;
+         }
+
+       /*        First, let's determine the roPos. */
+      if (    actMode == ACT_PICKABLE
+           || actMode == ACT_ACCL_PICKABLE
+         )
+         {
+          for( currRoPos = 0; currRoPos < w->roNum ; currRoPos++ )
+             {
+              if ( !strcmp(w->pendRec[curr].proid, w->roRec[currRoPos].roid) )
+                 {
+                  break;
+                 }
+             }
+          if ( currRoPos == w->roNum ) currRoPos = 0;
+         }
+      else
+         {
+          for( currRoPos = 0; currRoPos < w->roNum ; currRoPos++ )
+             {
+              if ( !strcmp(w->pendRec[curr].roid, w->roRec[currRoPos].roid) )
+                 {
+                  break;
+                 }
+             }
+          if ( currRoPos == w->roNum ) currRoPos = 0; /* should not need */
+         }
+
+                                       entcpy(singleCase,"Y");
+   if ( actMode == ACT_ACCL_PICKABLE ) entcpy(singleCase,"N");
+                                       entcpy(subType,"CASE");
+   if ( actMode == ACT_ACCL_PICKABLE ) entcpy(subType,"ALL");
+
+                                       entcpy(singleCase,"N");
+                                       entcpy(subType,"ALL");
+
+   popupACTIONScreen  (singleCase, strcmp(w->qpickStr,"3,4") == 0 ? MTH_PEND
+/* popupACTIONScreen*/                                            : MTH_HOLD,
+/* popupACTIONScreen*/ actMode,
+/* popupACTIONScreen*/ w->pendRec,w->pendNum,
+/* popupACTIONScreen*/ w->pendRec[curr].tin,
+/* popupACTIONScreen*/ w->pendRec[curr].tinfs,
+/* popupACTIONScreen*/ w->pendRec[curr].tintt,
+/* popupACTIONScreen*/ w->pendRec[curr].tinsid,
+/* popupACTIONScreen*/ w->pendRec[curr].caseind,
+/* popupACTIONScreen*/ w->pendRec[curr].roid,
+/* popupACTIONScreen*/ w->pendRec[curr].proid,
+/* popupACTIONScreen*/ w->pendRec[curr].status,
+/* popupACTIONScreen*/ -1,&exitNum,
+/* popupACTIONScreen*/ w->roRec,w->roNum,currRoPos,
+/* popupACTIONScreen*/ 0,0,subIdx,subNum, subType);
+
+   if ( oldQpickind != atoi(  w->pendRec[curr].qpickind)
+        || strcmp(oldQskipdt, w->pendRec[curr].skipdt)
+      )
+      {
+       /*
+       * update as needed if the case is ACCL
+       */
+       for( i = 0 ; i < w->pendNum ; i++ )
+          {
+           for( j = 0 ; j < w->acclNum ; j++ )
+              {
+               if (       atoi(w->acclRec[j].qpickind) !=
+                          atoi(w->pendRec[i].qpickind)
+                    && !strcmp(w->acclRec[j].tin    ,
+                               w->pendRec[i].tin     )
+                    && !strcmp(w->acclRec[j].tinfs  ,
+                               w->pendRec[i].tinfs   )
+                    && !strcmp(w->acclRec[j].tintt  ,
+                               w->pendRec[i].tintt   )
+                    && !strcmp(w->acclRec[j].tinsid ,
+                               w->pendRec[i].tinsid  )
+                    && !strcmp(w->acclRec[j].caseind,
+                               w->pendRec[i].caseind )
+                    && !strcmp(w->acclRec[j].status ,
+                               w->pendRec[i].status  )
+                  )
+                  {
+    entSyslog("Updating QPICK in ACCL list after CHANGE action %d", actMode);
+                   ent_sprintf(w->acclRec[j].qpickind,"%d",
+                      atoi(w->pendRec[i].qpickind));
+                   entcpy( w->acclRec[j].roid,
+                           w->pendRec[i].roid);
+                  }
+              }
+          }
+       fillPENDScroll(w);
+       /* Move to next item after last changed item            */
+       /*             unless HOLD/SKIP DATE is changed to NONE */
+       if (    atoi(w->pendRec[curr].qpickind) == QPICK_NONE
+            && oldQpickind != QPICK_NONE
+          ) w->pendScrl->curr_rec = curr;
+       else if (    curr < w->pendScrl->dataNum-1 )
+          w->pendScrl->curr_rec = curr + 1;
+       if ( w->pendScrl->curr_rec - w->pendScrl->top_rec >= w->scrlHeight )
+            w->pendScrl->top_rec = (w->pendScrl->curr_rec - w->scrlHeight) + 1;
+       ent_scroll(w->pendScrl,w->entscreen,0);
+      }
+   return(TRUE);
+}
+
+
+static int
+fillPENDScroll(PENDDATA *w)
+{
+   int i,idx=0;
+   char tmpFormatted[512] = "abc";
+   char zipcity[128];
+   char tinbaldue[128];
+   int curr;
+
+   char *headMsg[3] =
+   {
+"                                                                              ",
+"                                                                              ",
+"                                                                              "
+   };
+
+   char *pendMsg[2] =
+   {
+"                                                                                ",
+"                                                                                "
+   };
+   char *actMsg[1] =
+   {
+"                                                                                "
+   };
+
+   curr = w->pendScrl->curr_rec;
+   headMsg[0] = G_APP_NAME[0];
+   if ( strcmp(w->picktype,"SELECTED/PENDING") == 0 )
+   ent_sprintf(headMsg[1],"<C>        PENDING CASES STATUS");
+   else if ( strcmp(w->picktype,"HOLD/SKIPDATE") == 0 )
+   ent_sprintf(headMsg[1],"<C>        HOLD/SKIPDATE CASES STATUS");
+   ent_sprintf(headMsg[2],"SORT: %-35.35s",
+                  KEY_ARRAY[G_ENT_SORT_INDEX].flddesc);
+
+   if ( G_INTERNATIONAL[0] == 'Y' )
+      {
+       if (w->viewState == VIEWING_BAL )
+          {
+           entcpy(actMsg[0],
+               "<C></R/>F4<!R>-VIEW TIN  </R/>F6<!R>-SORT  </R/>F7<!R>-PRINT");
+           entcpy(pendMsg[0],
+"                                                             ");
+           ent_sprintf(pendMsg[1],
+" PRTY T-GL  %7.7s   CITY/COUNTRY     TAXPAYER NAME      QIND  BAL DUE  ROID",
+            strcmp(w->qpickStr,"1,2") == 0 ? "SKIP DT"
+                                           : "PICK DT");
+          }
+       else if (w->viewState == VIEWING_TIN )
+          {
+           entcpy(actMsg[0],
+              "<C></R/>F4<!R>-VIEW BAL  </R/>F6<!R>-SORT  </R/>F7<!R>-PRINT");
+           entcpy(pendMsg[0],
+"                                                             ");
+           ent_sprintf(pendMsg[1],
+" PRTY T-GL  %7.7s   CITY/COUNTRY     TAXPAYER NAME      QIND    TIN    ROID",
+            strcmp(w->qpickStr,"1,2") == 0 ? "SKIP DT"
+                                           : "PICK DT");
+          }
+      }
+   else
+      {
+       if (w->viewState == VIEWING_BAL )
+          {
+           entcpy(actMsg[0],
+               "<C></R/>F4<!R>-VIEW TIN  </R/>F6<!R>-SORT  </R/>F7<!R>-PRINT");
+           entcpy(pendMsg[0],
+"                           ZIP ASSN                          ");
+           ent_sprintf(pendMsg[1],
+" PRTY T-GL  %7.7s    ZIP   TO RO     TAXPAYER NAME      IND   BAL DUE  ROID",
+            strcmp(w->qpickStr,"1,2") == 0 ? "SKIP DT"
+                                           : "PICK DT");
+          }
+       else if (w->viewState == VIEWING_TIN )
+          {
+           entcpy(actMsg[0],
+              "<C></R/>F4<!R>-VIEW BAL  </R/>F6<!R>-SORT  </R/>F7<!R>-PRINT");
+           entcpy(pendMsg[0],
+"                           ZIP ASSN                          ");
+           ent_sprintf(pendMsg[1],
+" PRTY T-GL  %7.7s    ZIP   TO RO     TAXPAYER NAME      IND     TIN    ROID",
+            strcmp(w->qpickStr,"1,2") == 0 ? "SKIP DT"
+                                           : "PICK DT");
+          }
+      }
+   idx = w->pendScrl->dataNum;
+   for (i = 0; i < idx; i++)
+       deleteENTdataItem(w->pendScrl,idx-i-1);
+   idx = 0;
+   for (i=0; i<w->pendNum; i++)
+      {
+       if ( isProdMachine() )
+          {
+           if ( G_INTERNATIONAL[0] == 'Y' )
+               ent_sprintf(zipcity,"%-12.12s",
+                               w->pendRec[i].city);
+           else
+               ent_sprintf(zipcity,"%05d<#VL> %04d ",
+                               atoi(w->pendRec[i].zipcde),
+                               atoi(w->pendRec[i].proid+4));
+          }
+       else
+          {
+           if ( G_INTERNATIONAL[0] == 'Y' )
+               ent_sprintf(zipcity,"%05d-%-6.6s",
+                               atoi(w->pendRec[i].zipcde),
+                               w->pendRec[i].city);
+           else
+               ent_sprintf(zipcity,"%05d<#VL> %04d ",
+                               atoi(w->pendRec[i].zipcde),
+                               atoi(w->pendRec[i].proid+4));
+          }
+
+      if (w->viewState == VIEWING_BAL )
+         {
+          if ( 99999999.99 <             atof(w->pendRec[i].totassd) )
+              ent_sprintf(tinbaldue,"%11.0f",atof(w->pendRec[i].totassd));
+          else
+              ent_sprintf(tinbaldue,"%11.2f",atof(w->pendRec[i].totassd));
+         }
+      else if (w->viewState == VIEWING_TIN )
+         {
+          ent_sprintf(tinbaldue,"%11.11s",w->pendRec[i].tin);
+         }
+
+/* display line */
+      ent_sprintf(tmpFormatted,
+"%-4.4s<#VL>%1.1s-%02d<#VL>%-10.10s<#VL>%-s<#VL>%-23.23s<#VL>%1.1s<#VL>%-11.11s<#VL>%04d%s",
+            w->pendRec[i].arank,
+            w->pendRec[i].caseind,
+            atoi(w->pendRec[i].grade),
+            strcmp(w->qpickStr,"1,2") == 0
+            ?
+               strcmp(w->pendRec[i].skipdt,"01/01/1900") == 0 ? "          " :
+                      w->pendRec[i].skipdt
+            :
+               strcmp(w->pendRec[i].pickdt,"01/01/1900") == 0 ? "          " :
+                      w->pendRec[i].pickdt
+            ,
+            zipcity,
+            w->pendRec[i].tp,
+            QPICK_STRS[atoi(w->pendRec[i].qpickind)],
+            tinbaldue,
+            strcmp(w->qpickStr,"1,2") == 0 && atoi(w->pendRec[i].roid+6) == 0
+                                           ? 7000
+                                           : atoi(w->pendRec[i].roid+4),
+            !isProdMachine() && w->pendRec[i].status[0] == 'O' ? "*" : ""
+            );
+
+       addENTdataItem(w->pendScrl,tmpFormatted);
+       idx++;
+      }
+   w->pendScrl->curr_rec = curr;
+   if ( idx == 0 ) addENTdataItem(w->pendScrl,"EMPTY");
+
+   setENTdataItems(w->headLbl,headMsg);
+   setENTdataItems(w->pendLbl,pendMsg);
+   setENTdataItems(w->actLbl, actMsg);
+   ent_label(w->headLbl,w->entscreen);
+   ent_label(w->pendLbl,w->entscreen);
+   ent_label(w->actLbl ,w->entscreen);
+   ent_scroll(w->pendScrl,w->entscreen,0);
+}
+
+static void createAllWidgets (PENDDATA * w)
+{
+   char *recMsg[1] = { "XXXXXX of XXXXXX          " };
+   char *headMsg[3] = { "","","" };
+   char *currRoMsg[2];
+   char *pendMsg[2] = { "","" };
+   char *actMsg[1] = { "" };
+
+   w->recLbl->type        = ENT_LABEL;
+   w->recLbl->y_pos       =  0;
+   w->recLbl->x_pos       =  0;
+   w->recLbl->height      =  1;
+   w->recLbl->width       = 26;
+   w->recLbl->dataNum     =  1;
+   setENTdataItems(w->recLbl,recMsg);
+   w->recLbl->recLabelPre = "Record ";
+   w->recLbl->recLabelMid = " of ";
+   w->recLbl->recLabel    =  5001; /* match to desired ENT_SCROLL->recLabel */
+
+   w->headLbl->type       = ENT_LABEL;
+   w->headLbl->y_pos      =   0;
+   w->headLbl->x_pos      =   0;
+   w->headLbl->height     =   3;
+   w->headLbl->width      =  72;
+   w->headLbl->dataSize   = 256;
+   w->headLbl->dataNum    =   3;
+   setENTdataItems(w->headLbl,headMsg);
+
+   w->currRoLbl->type       = ENT_LABEL;
+   w->currRoLbl->y_pos      =  0;
+   w->currRoLbl->x_pos      = 72;
+   w->currRoLbl->height     =  2;
+   w->currRoLbl->width      =  8;
+   w->currRoLbl->dataNum    =  2;
+   currRoMsg[0] = "USER:";
+   currRoMsg[1] = G_ROID;
+   setENTdataItems(w->currRoLbl,currRoMsg);
+
+   w->pendLbl->type       = ENT_LABEL;
+   w->pendLbl->y_pos      =   0;
+   w->pendLbl->y_pos      =   3;
+   w->pendLbl->x_pos      =   0;
+   w->pendLbl->height     =   2;
+   w->pendLbl->width      =  78;
+   w->pendLbl->dataNum    =   2;
+   setENTdataItems(w->pendLbl,pendMsg);
+
+/* records display */
+   w->pendScrl->type = ENT_SCROLL;
+   w->pendScrl->y_pos      =  5;
+   w->pendScrl->x_pos      =  0;
+   w->pendScrl->height     = 18;
+   w->pendScrl->width      = 79;
+   w->pendScrl->outlinebox =  1;
+   w->pendScrl->recLabel   = 5001;
+   w->scrlHeight = w->pendScrl->height - (w->pendScrl->outlinebox * 2);
+
+/* option line at very bottom of screen */
+   w->actLbl->type       = ENT_LABEL;
+   w->actLbl->y_pos      =  23;
+   w->actLbl->x_pos      =   0;
+   w->actLbl->height     =   1;
+   w->actLbl->width      =  80;
+   w->actLbl->dataSize   = 256;
+   w->actLbl->dataNum    =   1;
+   setENTdataItems(w->actLbl,actMsg);
+}  /* end createAllWidgets() */
+
+
+/*
+ * entry point of PENDING/HOLD CASES STATUS
+ */
+void popupPENDScreen(
+       char *picktype,ENTREC *acclRec,int acclNum,ROREC *roList,int roNum)
+{
+/* custom variables */
+/* nothing for this screen file                          */
+
+/* Every screen should list an instance of the TRAVERSE struct and          */
+/*    the local XXXXDATA struct coded at top of the screen file(this file!) */
+   TRAVERSE traverse;
+   PENDDATA w;
+
+/* CB defs - be sure to duplicate in local registerCBXX function           */
+/* A corresponding int should be create for each CB function used          */
+/* These associate with widgets further below                              */
+/*                                         See:  key bindings              */
+   int helpCBnum  = 10001;
+   int escCBnum   = 10002;
+   int viewCBnum  = 10003;
+   int sortCBnum  = 10004;
+   int printCBnum = 10005;
+   int enterCBnum = 10006;
+
+/* The following should be an exact replica of the XXXXDATA struct at top  */
+/* beginning with the screenNum and continuing to the last WIDGET define   */
+/* except remove the pointer indication "*" from the definitions EXCEPT -- */
+/* the WINDOWs should remain pointer type & init parent/grandParent to 0   */
+/* unless used, then set to the appropriately passed WINDOW pointer        */
+/* Refers to SCREEN and WIDGET related elements only, not additional vars. */
+   int     screenNum;
+   WINDOW *entscreen;
+   WINDOW *parentScreen = 0;
+   WINDOW *grandParentScreen = 0;
+   int     exitENTscreen;
+   int     widgetNum;
+   int     widgetActive;
+   WIDGET  recLbl;
+   WIDGET  headLbl;
+   WIDGET  currRoLbl;
+   WIDGET  pendLbl;
+   WIDGET  pendScrl;
+   WIDGET  actLbl;
+
+/*  pre-processing of argument list and custom variables */
+   w.picktype = picktype;
+   w.acclRec = acclRec;
+   w.acclNum = acclNum;
+   w.roRec = roList;
+   w.roNum = roNum;
+   w.viewState = VIEWING_TIN;
+   w.pendRec = 0;
+   w.pendNum = 0;
+
+
+/* The following sets the size of the screen and sets up correlation          */
+/* between the XXXXDATA struct(see immediately above) and the TRAVERSE struct */
+/* and provides TRAVERSE with needed information                              */
+/*        ie  how many widgets (widgetNum) and                                */
+/*            which should be active to start with (widgetActive)             */
+/* Note that TRAVERSE will handle the WIDGETS in the order specified by       */
+/*                                      traverse.widget[ORDER NUMBER]         */
+   screenNum = 16; /* see entity_common.pc for number to use */
+   entscreen = newwin(24,80,0,0);
+
+   traverse.screenNum         = w.screenNum         = &screenNum;
+   traverse.entscreen         = w.entscreen         = entscreen;
+   traverse.parentScreen      = w.parentScreen      = parentScreen;
+   traverse.grandParentScreen = w.grandParentScreen = grandParentScreen;
+   traverse.exitENTscreen     = w.exitENTscreen     = &exitENTscreen;
+   traverse.widgetNum         = w.widgetNum         = &widgetNum;
+   traverse.widgetActive      = w.widgetActive      = &widgetActive;
+   traverse.widget[0]         = w.recLbl            = &recLbl;
+   traverse.widget[1]         = w.headLbl           = &headLbl;
+   traverse.widget[2]         = w.currRoLbl         = &currRoLbl;
+   traverse.widget[3]         = w.pendLbl           = &pendLbl;
+   traverse.widget[4]         = w.pendScrl          = &pendScrl;
+   traverse.widget[5]         = w.actLbl            = &actLbl;
+
+  *traverse.widgetNum = 6;    /* base 1 */
+  *traverse.widgetActive = 4; /* base 0 */
+
+/* initialize to defaults */
+   widgetInitAll(&traverse);
+
+/* post-processing of argument list and custom variables */
+/* nothing for this screen file                          */
+
+/* key bindings                                          */
+/* match widget function keys to appropriate CBs         */
+/* xxxxCBnum will cause execution of the xxxxCB function */
+   w.pendScrl->key_f1    = helpCBnum;
+   w.pendScrl->key_esc   = escCBnum;
+   w.pendScrl->key_f4    = viewCBnum;
+   w.pendScrl->key_f6    = sortCBnum;
+   w.pendScrl->key_f7    = printCBnum;
+   w.pendScrl->key_enter = enterCBnum;
+
+/* initialization/run/cleanup */
+   createAllWidgets(&w);
+   widgetPaintAll(&traverse);
+   refreshENTscreen(w.entscreen);
+   getPendData(&w);
+   fillPENDScroll(&w);
+   widgetPaintAll(&traverse);
+   traverseENTscreen(&traverse,(void *)&w);
+   cleanup(&traverse);
+}

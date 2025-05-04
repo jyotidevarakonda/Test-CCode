@@ -1,0 +1,76 @@
+CREATE OR REPLACE function ENTITYDEV.wi_range(ronum in number,
+                                    grd in number,
+                                    adj in number,
+                                    emptype in char,
+                                    emppostype in char,
+                                    emporg in char)
+	return character
+is
+	cases     number(4) := 0;
+	ro_max    number(3) := 0;
+	ro_min    number(3):= 0;
+	mid       number(3) :=0;
+	inout     char(5) := '     ';
+begin
+	-- First get info about RO
+	select
+		nvl(count(*),0)
+	into
+		cases
+	from
+		trantrail
+	where
+		trantrail.roid = ronum and
+		trantrail.status = 'O';
+
+	select
+		top,
+		bottom,
+		round((top + bottom) / 2)
+	into
+		ro_max,
+		ro_min,
+		mid
+	from
+		targetlvl
+	where
+		targetlvl.grade = grd;
+
+	-- If adj percent is other than 1, fix the top and bottom brackets.
+	if(adj ^= 1) then
+        select round((ro_max *(100 - adj)) / 100) into ro_max from dual;
+        select round((ro_min * (100 - adj)) / 100) into ro_min from dual;
+        select round((ro_max+ro_min)/2) into mid from dual;
+
+	end if;
+
+	select
+		CASE
+			WHEN emptype = 'R' and emppostype in ('D','I','N','S','T','U') and
+                  emporg = 'CF' THEN
+				CASE WHEN nvl(cases,0) = 0 then 'NOINV'
+					 WHEN cases < ro_min then 'BELOW'
+			     	 WHEN (cases >= ro_min and cases < mid) then '     '
+				 	 WHEN (cases >= mid and cases <= ro_max) then '     '
+				 	 WHEN cases > ro_max then 'ABOVE'
+				ELSE '     '
+				END
+-- 'calc_target'
+		ELSE '     '
+-- ro_only
+		END
+	into
+		inout
+	from
+		dual;
+
+	return(inout);
+
+	EXCEPTION
+		when
+            no_data_found then
+			return('    ');
+		when others then
+			dbms_output.put_line('sqlcode: '||sqlcode||' ERRM: '||sqlerrm);
+END;
+/

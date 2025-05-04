@@ -1,0 +1,109 @@
+-- Assuming you are replacing the WI_RANGE function inline
+-- and joining entemp (aliased as p), timetin summary (aliased as t), trantrail (for cases), and targetlvl (for top/bottom)
+
+SELECT 
+    NVL(p.EACTIVE, 'N') AS eactive,
+    NVL(p.ORG, 'XX') AS org,
+    p.BADGE AS badge,
+    p.SEID AS seid,
+    NVL(p.ROID, 0) AS roid,
+    p.ELEVEL AS elevel,
+    p.NAME AS name,
+    SUBSTR(NAMECHOP(p.NAME, p.TYPE), 1, 25) AS nameAbbr,
+    p.TYPE AS type,
+    p.ICSACC AS icsacc,
+    p.TITLE AS title,
+    p.AREA AS area,
+    p.TOUR AS tour,
+    p.PODIND AS podind,
+    p.FLEXIND AS flexind,
+    p.EMPDT AS empdate,
+    (SELECT MAX(form809) FROM ENTACT a WHERE a.roid = p.roid) AS form809,
+    (SELECT MAX(actdt) FROM ENTACT a WHERE a.roid = p.roid AND form809 IS NOT NULL) AS form809Date,
+    NVL(p.GRADE, 0) AS grade,
+    p.POSTYPE,
+    SUBSTR(NVL(EMPTYPE(p.TYPE, p.POSTYPE, p.ELEVEL), 'UNKNOWN'), 1, 8) AS empType,
+    NVL(p.ADJPERCENT, 0) AS adjpercent,
+    p.ADJREASON,
+    -- Inline WI_RANGE replacement
+    SUBSTR(
+        CASE 
+            WHEN p.TYPE = 'R' 
+              AND p.POSTYPE IN ('D','I','N','S','T','U') 
+              AND p.ORG = 'CF' THEN
+                CASE 
+                    WHEN NVL(tt.cases, 0) = 0 THEN 'NOINV'
+                    WHEN tt.cases < 
+                        CASE WHEN NVL(p.ADJPERCENT,1) <> 1 THEN ROUND((tl.bottom * (100 - p.ADJPERCENT)) / 100)
+                             ELSE tl.bottom END THEN 'BELOW'
+                    WHEN tt.cases BETWEEN 
+                        CASE WHEN NVL(p.ADJPERCENT,1) <> 1 THEN ROUND((tl.bottom * (100 - p.ADJPERCENT)) / 100)
+                             ELSE tl.bottom END AND 
+                        CASE WHEN NVL(p.ADJPERCENT,1) <> 1 THEN ROUND((tl.top * (100 - p.ADJPERCENT)) / 100)
+                             ELSE tl.top END THEN '     '
+                    WHEN tt.cases > 
+                        CASE WHEN NVL(p.ADJPERCENT,1) <> 1 THEN ROUND((tl.top * (100 - p.ADJPERCENT)) / 100)
+                             ELSE tl.top END THEN 'ABOVE'
+                    ELSE '     '
+                END
+            ELSE '     '
+        END, 1, 5
+    ) AS invWarn,
+
+    (gs9cnt + gs11cnt + gs12cnt + gs13cnt) AS openStot,
+    gs9cnt,
+    gs11cnt,
+    gs12cnt,
+    gs13cnt,
+    (SELECT SUM(totassd) FROM ent e, trantrail t WHERE e.tinsid = t.tinsid AND t.roid = p.roid AND t.status = 'O') AS totDollars,
+    day30,
+    day60,
+    day90,
+    day120,
+    (SELECT SUM(emphrs) FROM trantrail t WHERE t.roid = p.roid AND t.status = 'O') AS dirTothrs,
+    DECODE(p.GRADE, 12, gr12_30hrs, 13, gr13_30hrs, gr11_30hrs) AS ABV30DAYHRS,
+    DECODE(p.GRADE, 12, gr12_60hrs, 13, gr13_60hrs, gr11_60hrs) AS ABV60DAYHRS,
+    DECODE(p.GRADE, 12, gr12_90hrs, 13, gr13_90hrs, gr11_90hrs) AS ABV90DAYHRS,
+    DECODE(p.GRADE, 12, gr12_120hrs, 13, gr13_120hrs, gr11_120hrs) AS ABV120DAYHRS,
+    ROUND((DECODE(p.GRADE, 12, gr12_30hrs, 13, gr13_30hrs, gr11_30hrs)) / GREATEST(day30,1), 2) * 100 avg,
+    ROUND((DECODE(p.GRADE, 12, gr12_60hrs, 13, gr13_60hrs, gr11_60hrs)) / GREATEST(day60,1), 2) * 100 avg,
+    ROUND((DECODE(p.GRADE, 12, gr12_90hrs, 13, gr13_90hrs, gr11_90hrs)) / GREATEST(day90,1), 2) * 100 avg,
+    ROUND((DECODE(p.GRADE, 12, gr12_120hrs, 13, gr13_120hrs, gr11_120hrs)) / GREATEST(day120,1), 2) * 100 avg,
+    GREATEST(
+        NVL((SELECT MAX(timetin.rptdt) FROM timetin WHERE timetin.roid = p.roid), TO_DATE('01/01/1900','MM/DD/YYYY')),
+        NVL((SELECT MAX(timenon.rptdt) FROM timenon WHERE timenon.roid = p.roid), TO_DATE('01/01/1900','MM/DD/YYYY'))
+    ) AS lastTimeDate,
+    NVL(p.lastlogin, TO_DATE('01/01/1900','MM/DD/YYYY')) AS lastAccessDate,
+    (SELECT MAX(EXTRDT) FROM entemp) AS extrdt
+FROM entemp p
+LEFT JOIN (
+    SELECT roid, 
+        SUM(CASE WHEN (SYSDATE - rptdt) <= 30 THEN hours ELSE 0 END) day30,
+        SUM(CASE WHEN (SYSDATE - rptdt) <= 60 THEN hours ELSE 0 END) day60,
+        SUM(CASE WHEN (SYSDATE - rptdt) <= 90 THEN hours ELSE 0 END) day90,
+        SUM(CASE WHEN (SYSDATE - rptdt) <= 120 THEN hours ELSE 0 END) day120,
+        SUM(CASE WHEN (SYSDATE - rptdt) <= 30 AND grade > 11 THEN hours ELSE 0 END) gr11_30hrs,
+        SUM(CASE WHEN (SYSDATE - rptdt) <= 30 AND grade > 12 THEN hours ELSE 0 END) gr12_30hrs,
+        SUM(CASE WHEN (SYSDATE - rptdt) <= 30 AND grade > 13 THEN hours ELSE 0 END) gr13_30hrs,
+        SUM(CASE WHEN (SYSDATE - rptdt) <= 60 AND grade > 11 THEN hours ELSE 0 END) gr11_60hrs,
+        SUM(CASE WHEN (SYSDATE - rptdt) <= 60 AND grade > 12 THEN hours ELSE 0 END) gr12_60hrs,
+        SUM(CASE WHEN (SYSDATE - rptdt) <= 60 AND grade > 13 THEN hours ELSE 0 END) gr13_60hrs,
+        SUM(CASE WHEN (SYSDATE - rptdt) <= 90 AND grade > 11 THEN hours ELSE 0 END) gr11_90hrs,
+        SUM(CASE WHEN (SYSDATE - rptdt) <= 90 AND grade > 12 THEN hours ELSE 0 END) gr12_90hrs,
+        SUM(CASE WHEN (SYSDATE - rptdt) <= 90 AND grade > 13 THEN hours ELSE 0 END) gr13_90hrs,
+        SUM(CASE WHEN (SYSDATE - rptdt) <= 120 AND grade > 11 THEN hours ELSE 0 END) gr11_120hrs,
+        SUM(CASE WHEN (SYSDATE - rptdt) <= 120 AND grade > 12 THEN hours ELSE 0 END) gr12_120hrs,
+        SUM(CASE WHEN (SYSDATE - rptdt) <= 120 AND grade > 13 THEN hours ELSE 0 END) gr13_120hrs,
+        MAX(rptdt) maxrpt
+    FROM timetin 
+    WHERE rptdt >= (SYSDATE - 120)
+    GROUP BY roid
+) t ON p.roid = t.roid
+LEFT JOIN (
+    SELECT roid, COUNT(*) AS cases
+    FROM trantrail
+    WHERE status = 'O'
+    GROUP BY roid
+) tt ON p.roid = tt.roid
+LEFT JOIN targetlvl tl ON tl.grade = p.grade
+WHERE p.eactive IN ('Y', 'A')

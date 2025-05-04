@@ -1,0 +1,118 @@
+select 
+	NVL(EACTIVE,'N') as eactive,
+	NVL(ORG,'XX') as org,
+	BADGE as badge,
+	SEID as seid,
+	NVL(p.ROID,0) as roid,
+	ELEVEL as elevel ,
+	NAME as name,
+	SUBSTR(NAMECHOP(NAME,TYPE),1,25) as nameAbbr,
+	TYPE as type,
+	ICSACC as icsacc,
+	TITLE as title,
+	AREA as area,
+	TOUR as tour,
+	PODIND as podind,
+	FLEXIND as flexind,
+	EMPDT as empdate,
+	(SELECT max(form809) from ENTACT a where
+    	a.roid = p.roid) as form809,
+	(SELECT max(actdt) from ENTACT a where
+    	a.roid = p.roid and form809 is not null) as form809Date,
+--	(SELECT max(form809) from ENTACT a where
+--   		a.roid = p.roid and actdt = ( select max(actdt)
+--   		from entact b where a.roid = b.roid and b.form809 is not null) 
+--   		and a.form809 is not null),
+--	(SELECT max(actdt) from ENTACT a where
+--   		a.roid = p.roid and actdt = (select max(actdt)
+--   		from entact b where a.roid = b.roid and a.form809 = b.form809)),
+	NVL(GRADE,0) as grade,
+	POSTYPE,
+	SUBSTR(NVL(EMPTYPE(TYPE,POSTYPE,ELEVEL),'UNKNOWN'),1,8) as empType,
+	NVL(ADJPERCENT,0) as adjpercent,
+	ADJREASON,
+	--INVLEVEL(GRADE,'TOP') as invTop,
+	--INVLEVEL(GRADE,'BOTTOM') as invBottom,
+	SUBSTR(NVL(WI_RANGE(p.ROID,p.GRADE,ADJPERCENT,p.TYPE,POSTYPE,ORG),
+		'     '),1,5) as invWarn,
+	(gs9cnt + gs11cnt + gs12cnt + gs13cnt) as openStot,
+	gs9cnt,
+	gs11cnt,
+	gs12cnt,
+	gs13cnt,
+	(select sum(totassd) from ent e, trantrail t
+		where e.tinsid = t.tinsid
+			and t.roid = p.roid
+			and t.status = 'O') as totDollars,
+	day30,
+	day60,
+	day90,
+	day120,
+	(select sum(emphrs) from trantrail t
+		where t.roid = p.roid and t.status = 'O') as dirTothrs,
+	decode(grade,12,gr12_30hrs,13,gr13_30hrs,gr11_30hrs) as ABV30DAYHRS,
+	decode(grade,12,gr12_60hrs,13,gr13_60hrs,gr11_60hrs) as ABV60DAYHRS,
+	decode(grade,12,gr12_90hrs,13,gr13_90hrs,gr11_90hrs) as ABV90DAYHRS,
+	decode(grade,12,gr12_120hrs,13,gr13_120hrs,gr11_120hrs) as ABV120DAYHRS,
+	round((decode(grade,12,gr12_30hrs,13,gr13_30hrs,gr11_30hrs))/
+    	greatest(day30,1),2)*100 avg ,
+	round((decode(grade,12,gr12_60hrs,13,gr13_60hrs,gr11_60hrs))/
+    	greatest(day60,1),2)*100 avg,
+	round((decode(grade,12,gr12_90hrs,13,gr13_90hrs,gr11_90hrs))/
+    	greatest(day90,1),2)*100 avg,
+    	
+	round((decode(grade,12,gr12_120hrs,13,
+    	gr13_120hrs,gr11_120hrs))/ greatest(day120,1),2)*100 avg,
+	greatest(
+		(nvl((select max(timetin.rptdt) from timetin
+                where timetin.roid = p.roid),'01/01/1900')),
+		(nvl((select max(timenon.rptdt) from timenon
+                where timenon.roid = p.roid),'01/01/1900'))) as lastTimeDate,
+	NVL(lastlogin,'01/01/1900') as lastAccessDate,
+	(select max(EXTRDT) from entemp) as extrdt
+from
+	entemp p,
+	(select roid, 
+		sum(case when (sysdate - rptdt) <= 30 then hours else 0 end) day30,
+		sum(case when (sysdate - rptdt) <= 60 then hours else 0 end) day60,
+		sum(case when (sysdate - rptdt) <= 90 then hours else 0 end) day90,
+		sum(case when (sysdate - rptdt) <= 120 then hours else 0 end) day120,
+		sum(case when (sysdate - rptdt) <= 30 and grade > 11 then hours
+			else 0 end) gr9_30hrs,
+		sum(case when (sysdate - rptdt) <= 30 and grade > 11 then hours
+			else 0 end) gr11_30hrs,
+		sum(case when (sysdate - rptdt) <= 30 and grade > 12 then hours
+			else 0 end) gr12_30hrs,
+		sum(case when (sysdate - rptdt) <= 30 and grade > 13 then hours
+			else 0 end) gr13_30hrs,
+		sum(case when (sysdate - rptdt) <= 60 and grade > 11 then hours
+			else 0 end) gr9_60hrs,
+		sum(case when (sysdate - rptdt) <= 60 and grade > 11 then hours
+			else 0 end) gr11_60hrs,
+		sum(case when (sysdate - rptdt) <= 60 and grade > 12 then hours
+			else 0 end) gr12_60hrs,
+		sum(case when (sysdate - rptdt) <= 60 and grade > 13 then hours
+			else 0 end) gr13_60hrs,
+		sum(case when (sysdate - rptdt) <= 90 and grade > 11 then hours
+			else 0 end) gr9_90hrs,
+		sum(case when (sysdate - rptdt) <= 90 and grade > 11 then hours
+			else 0 end) gr11_90hrs,
+		sum(case when (sysdate - rptdt) <= 90 and grade > 12 then hours
+			else 0 end) gr12_90hrs,
+		sum(case when (sysdate - rptdt) <= 90 and grade > 13 then hours
+			else 0 end) gr13_90hrs,
+		sum(case when (sysdate - rptdt) <= 120 and grade > 11 then hours
+			else 0 end) gr9_120hrs,
+		sum(case when (sysdate - rptdt) <= 120 and grade > 11 then hours
+			else 0 end) gr11_120hrs,
+		sum(case when (sysdate - rptdt) <= 120 and grade > 12 then hours
+			else 0 end) gr12_120hrs,
+		sum(case when (sysdate - rptdt) <= 120 and grade > 13 then hours
+			else 0 end) gr13_120hrs,
+		max(rptdt) maxrpt
+	from timetin 
+	where rptdt >= (sysdate - 120)
+	group by roid) t
+where
+	p.roid = t.roid(+)
+	and eactive in ('Y','A')

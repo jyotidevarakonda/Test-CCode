@@ -1,0 +1,37 @@
+CREATE OR REPLACE function ENTITYDEV.INVLEVEL
+        (gradenum in number, top_bottom in varchar2)
+        return number
+IS
+   level_count number;
+BEGIN
+   level_count := 0;
+   if ( top_bottom = 'TOP' ) then
+      select count(*)
+        into level_count
+        from targetlvl
+       where grade = gradenum;
+      if ( level_count > 0 ) then
+         select top
+           into level_count
+           from targetlvl
+          where grade = gradenum;
+      end if;
+   end if;
+   if ( top_bottom = 'BOTTOM' ) then
+      select count(*)
+        into level_count
+        from targetlvl
+       where grade = gradenum;
+      if ( level_count > 0 ) then
+         select bottom
+           into level_count
+           from targetlvl
+          where grade = gradenum;
+      end if;
+   end if;
+   return (level_count);
+EXCEPTION
+   when others then
+      dbms_output.put_line('sqlcode: '||sqlcode||' ERRM: '||sqlerrm);
+END;
+/

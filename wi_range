@@ -99,3 +99,55 @@ END;
             ELSE '     '
         END, 1, 5
     ) AS invWarn,
+
+
+
+
+
+
+
+
+SELECT 
+    p.BADGE AS badge,
+    p.SEID AS seid,
+    NVL(p.ROID, 0) AS roid,
+    p.NAME AS name,
+    p.TITLE AS title,   
+    p.TOUR AS tour,    
+    NVL(p.GRADE, 0) AS grade,
+    SUBSTR(NVL(EMPTYPE(p.TYPE, p.POSTYPE, p.ELEVEL), 'UNKNOWN'), 1, 8) AS empType,
+    NVL(ADJPERCENT, 0) AS adjpercent,
+    p.ADJREASON,
+     SUBSTR(
+        CASE 
+            WHEN p.TYPE = 'R' 
+              AND p.POSTYPE IN ('D','I','N','S','T','U') 
+              AND p.ORG = 'CF' THEN
+                CASE 
+                    WHEN NVL(tt.cases, 0) = 0 THEN 'NOINV'
+                    WHEN tt.cases < 
+                        CASE WHEN NVL(p.ADJPERCENT,1) <> 1 THEN ROUND((tl.bottom * (100 - p.ADJPERCENT)) / 100)
+                             ELSE tl.bottom END THEN 'BELOW'
+                    WHEN tt.cases BETWEEN 
+                        CASE WHEN NVL(p.ADJPERCENT,1) <> 1 THEN ROUND((tl.bottom * (100 - p.ADJPERCENT)) / 100)
+                             ELSE tl.bottom END AND 
+                        CASE WHEN NVL(p.ADJPERCENT,1) <> 1 THEN ROUND((tl.top * (100 - p.ADJPERCENT)) / 100)
+                             ELSE tl.top END THEN '     '
+                    WHEN tt.cases > 
+                        CASE WHEN NVL(p.ADJPERCENT,1) <> 1 THEN ROUND((tl.top * (100 - p.ADJPERCENT)) / 100)
+                             ELSE tl.top END THEN 'ABOVE'
+                    ELSE '     '
+                END
+            ELSE '     '
+        END, 1, 5
+    ) AS invWarn
+     
+FROM entemp p
+LEFT JOIN (
+    SELECT roid, COUNT(*) AS cases
+    FROM trantrail
+    WHERE status = 'O'
+    GROUP BY roid
+) tt ON p.roid = tt.roid
+LEFT JOIN targetlvl tl ON tl.grade = p.grade
+WHERE p.eactive IN ('Y', 'A')

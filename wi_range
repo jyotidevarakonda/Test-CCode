@@ -151,3 +151,74 @@ LEFT JOIN (
 ) tt ON p.roid = tt.roid
 LEFT JOIN targetlvl tl ON tl.grade = p.grade
 WHERE p.eactive IN ('Y', 'A')
+
+
+
+
+
+SELECT 
+    p.BADGE AS badge,
+    p.SEID AS seid,
+    CASE WHEN p.ROID IS NULL THEN 0 ELSE p.ROID END AS roid,
+    p.NAME AS name,
+    p.TITLE AS title,   
+    p.TOUR AS tour,    
+    CASE WHEN p.GRADE IS NULL THEN 0 ELSE p.GRADE END AS grade,
+    SUBSTR(
+        CASE 
+            WHEN EMPTYPE(p.TYPE, p.POSTYPE, p.ELEVEL) IS NULL THEN 'UNKNOWN'
+            ELSE EMPTYPE(p.TYPE, p.POSTYPE, p.ELEVEL)
+        END, 1, 8
+    ) AS empType,
+    CASE WHEN p.ADJPERCENT IS NULL THEN 0 ELSE p.ADJPERCENT END AS adjpercent,
+    p.ADJREASON,
+    
+    SUBSTR(
+        CASE 
+            WHEN p.TYPE = 'R' 
+              AND p.POSTYPE IN ('D','I','N','S','T','U') 
+              AND p.ORG = 'CF' THEN
+                CASE 
+                    WHEN tt.cases IS NULL OR tt.cases = 0 THEN 'NOINV'
+                    
+                    WHEN tt.cases < 
+                        CASE 
+                            WHEN p.ADJPERCENT IS NULL OR p.ADJPERCENT <> 1 
+                            THEN ROUND((tl.bottom * (100 - CASE WHEN p.ADJPERCENT IS NULL THEN 0 ELSE p.ADJPERCENT END)) / 100)
+                            ELSE tl.bottom 
+                        END THEN 'BELOW'
+
+                    WHEN tt.cases BETWEEN 
+                        CASE 
+                            WHEN p.ADJPERCENT IS NULL OR p.ADJPERCENT <> 1 
+                            THEN ROUND((tl.bottom * (100 - CASE WHEN p.ADJPERCENT IS NULL THEN 0 ELSE p.ADJPERCENT END)) / 100)
+                            ELSE tl.bottom 
+                        END AND 
+                        CASE 
+                            WHEN p.ADJPERCENT IS NULL OR p.ADJPERCENT <> 1 
+                            THEN ROUND((tl.top * (100 - CASE WHEN p.ADJPERCENT IS NULL THEN 0 ELSE p.ADJPERCENT END)) / 100)
+                            ELSE tl.top 
+                        END THEN '     '
+
+                    WHEN tt.cases > 
+                        CASE 
+                            WHEN p.ADJPERCENT IS NULL OR p.ADJPERCENT <> 1 
+                            THEN ROUND((tl.top * (100 - CASE WHEN p.ADJPERCENT IS NULL THEN 0 ELSE p.ADJPERCENT END)) / 100)
+                            ELSE tl.top 
+                        END THEN 'ABOVE'
+                    
+                    ELSE '     '
+                END
+            ELSE '     '
+        END, 1, 5
+    ) AS invWarn
+
+FROM entemp p
+LEFT JOIN (
+    SELECT roid, COUNT(*) AS cases
+    FROM trantrail
+    WHERE status = 'O'
+    GROUP BY roid
+) tt ON p.roid = tt.roid
+LEFT JOIN targetlvl tl ON tl.grade = p.grade
+WHERE p.eactive IN ('Y', 'A');

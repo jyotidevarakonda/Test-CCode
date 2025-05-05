@@ -74,3 +74,28 @@ begin
 			dbms_output.put_line('sqlcode: '||sqlcode||' ERRM: '||sqlerrm);
 END;
 /
+
+
+  SUBSTR(
+        CASE 
+            WHEN p.TYPE = 'R' 
+              AND p.POSTYPE IN ('D','I','N','S','T','U') 
+              AND p.ORG = 'CF' THEN
+                CASE 
+                    WHEN NVL(tt.cases, 0) = 0 THEN 'NOINV'
+                    WHEN tt.cases < 
+                        CASE WHEN NVL(p.ADJPERCENT,1) <> 1 THEN ROUND((tl.bottom * (100 - p.ADJPERCENT)) / 100)
+                             ELSE tl.bottom END THEN 'BELOW'
+                    WHEN tt.cases BETWEEN 
+                        CASE WHEN NVL(p.ADJPERCENT,1) <> 1 THEN ROUND((tl.bottom * (100 - p.ADJPERCENT)) / 100)
+                             ELSE tl.bottom END AND 
+                        CASE WHEN NVL(p.ADJPERCENT,1) <> 1 THEN ROUND((tl.top * (100 - p.ADJPERCENT)) / 100)
+                             ELSE tl.top END THEN '     '
+                    WHEN tt.cases > 
+                        CASE WHEN NVL(p.ADJPERCENT,1) <> 1 THEN ROUND((tl.top * (100 - p.ADJPERCENT)) / 100)
+                             ELSE tl.top END THEN 'ABOVE'
+                    ELSE '     '
+                END
+            ELSE '     '
+        END, 1, 5
+    ) AS invWarn,

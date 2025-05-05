@@ -1,0 +1,79 @@
+CREATE OR REPLACE function ENTITYDEV.EMPTYPE
+        (emp_type in char, emp_postype in char, emp_elevel in number)
+	return varchar2
+IS
+	emp_short  varchar2(8);
+BEGIN
+
+Select
+CASE
+	 WHEN emp_type    = 'H' then 'HOLDFILE'
+	 WHEN emp_postype = 'B' then 'BLOCKED'
+	 WHEN emp_postype = 'V' then 'VACANT'
+	 WHEN emp_postype = 'L' then 'LONGTERM'
+	 WHEN emp_elevel  =  7
+			and emp_type in ('M','R') then
+			decode(emp_type,'M','M-ACTMGR',
+					        'R','R-ACTMGR')
+	 WHEN emp_postype = 'F' then 'FRAUD'
+	 WHEN emp_postype = 'O' then 'OIC'
+	 WHEN emp_postype = 'S' then 'SPC'
+	 WHEN emp_postype = 'N' then
+				decode(nvl(emp_type,'D'),'C','CLERK',
+                                     'D','AREA',
+                                     'M','MANAGER',
+                                     'P','PARA PRO',
+                                     'R','RO',
+									 'S','SPF',
+                                     'T','REV REP',' ')
+	 WHEN emp_postype = 'Y' then
+				decode(nvl(emp_type,'D'),'C','CLERK',
+                                     'D','AREA',
+                                     'M','MANAGER',
+                                     'P','PARA PRO',
+                                     'R','RO-NOINV',
+									 'S','SPF',
+                                     'T','REV REP',' ')
+	 WHEN emp_postype = 'D' then
+				decode(nvl(emp_type,'D'),'C','C-DOUT`',
+                                     'M','M-DOUT',
+                                     'P','P-DOUT',
+                                     'R','RO-DOUT',
+                                     'T','RR-DOUT',' ')
+	WHEN emp_postype = 'I' then
+				decode(emp_type,'P','P-TRAIN',
+  						    'R','RO-TRAIN','  ')
+	 WHEN emp_postype = 'M' then
+				decode(emp_type,'C','C-MMIA',
+                            'P','P-MMIA',
+							'R','RO-MMIA','   ')
+	WHEN emp_postype = 'Q' then
+				decode(nvl(emp_type,'D'),'C','C-CQMS',
+									 'D','AO-CQMS',
+									 'M','M-CQMS',
+									 'P','P-CQMS',
+									 'R','RO-CQMS',' ')
+	WHEN emp_postype = 'U' then
+				decode(nvl(emp_type,'D'),'C','C-DUTY',
+									 'D','AO-DUTY',
+									 'M','M-DUTY',
+									 'P','P-DUTY',
+									'R','RO-DUTY',
+									 'S','SPF',
+									'T','RR-DUTY',' ')
+	WHEN emp_postype = 'T' then
+				decode(nvl(emp_type,'D'),'C','C-OJI',
+								'D','AO-OJI',
+								'M','M-OJI',
+								'P','P-OJI',
+								'R','R-OJI',
+								'T','RR-OJI',' ')
+ELSE '   ' END
+			 into emp_short from dual;
+
+   return(emp_short);
+EXCEPTION
+   when others then
+      dbms_output.put_line('sqlcode: '||sqlcode||' ERRM: '||sqlerrm);
+END;
+/

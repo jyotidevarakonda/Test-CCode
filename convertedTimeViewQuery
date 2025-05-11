@@ -1,0 +1,115 @@
+SELECT rptdt, timetin.roid, archiveinv.type, subcode, cdname, 
+       hours, ctrsdef, timedef, ctrsln 
+FROM timetin, entcode, archiveinv
+WHERE active IN ('Y','C')
+  AND subcode = entcode.code
+  AND month = (SELECT DISTINCT rptmnth FROM eom 
+               WHERE rptenddt = (SELECT MAX(rptenddt) FROM eom))
+  AND timetin.roid = archiveinv.roid
+  AND subcode <= '500'
+  AND entcode.type = 'S'
+  AND entcode.timedef IN ('D','T')
+  AND entcode.code NOT IN ('106','107','309','310','311','312','313',
+                           '314','315','316','317','318','319')
+  AND area = 1
+  AND EXISTS (
+    SELECT 1 FROM entmod 
+    WHERE timetin.roid = entmod.roid 
+      AND timetin.timesid = entmod.emodsid 
+      AND type IN ('N','O','R','T','X','Y'))
+
+UNION
+
+SELECT rptdt, timetin.roid, archiveinv.type, '000' subcode, cdname, 
+       hours, 1 ctrsdef, 'T' timedef, 0 ctrsln 
+FROM timetin, entcode, archiveinv
+WHERE active IN ('Y','C')
+  AND subcode = entcode.code
+  AND month = (SELECT DISTINCT rptmnth FROM eom 
+               WHERE rptenddt = (SELECT MAX(rptenddt) FROM eom))
+  AND timetin.roid = archiveinv.roid
+  AND subcode <= '500'
+  AND entcode.type = 'S'
+  AND entcode.timedef = 'D'
+  AND entcode.code NOT IN ('106','107','309','310','311','312','313',
+                           '314','315','316','317','318','319')
+  AND area = 1
+  AND NOT EXISTS (
+    SELECT 1 FROM entmod 
+    WHERE timetin.roid = entmod.roid 
+      AND timetin.timesid = entmod.emodsid 
+      AND type IN ('N','O','R','T','X','Y'))
+
+UNION
+
+SELECT rptdt, timetin.roid, archiveinv.type, subcode, cdname, 
+       hours, ctrsdef, timedef, ctrsln 
+FROM timetin, entcode, archiveinv
+WHERE active IN ('Y','C')
+  AND subcode = entcode.code
+  AND month = (SELECT DISTINCT rptmnth FROM eom 
+               WHERE rptenddt = (SELECT MAX(rptenddt) FROM eom))
+  AND timetin.roid = archiveinv.roid
+  AND subcode <= '500'
+  AND entcode.type = 'S'
+  AND entcode.timedef = 'D'
+  AND entcode.code IN ('106','107','309','310','311','312','313',
+                       '314','315','316','317','318','319')
+  AND area = 1
+
+UNION
+
+SELECT rptdt, timetin.roid, archiveinv.type, '000' subcode, cdname, 
+       hours, ctrsdef, timedef, ctrsln 
+FROM timetin, entcode, archiveinv
+WHERE active IN ('Y','C')
+  AND subcode = entcode.code
+  AND month = (SELECT DISTINCT rptmnth FROM eom 
+               WHERE rptenddt = (SELECT MAX(rptenddt) FROM eom))
+  AND timetin.roid = archiveinv.roid
+  AND subcode <= '500'
+  AND entcode.type = 'S'
+  AND entcode.timedef <> 'D'
+  AND area = 1
+  AND NOT EXISTS (
+    SELECT 1 FROM entmod 
+    WHERE timetin.roid = entmod.roid 
+      AND timetin.timesid = entmod.emodsid 
+      AND type IN ('N','O','R','T','X','Y'))
+
+UNION
+
+SELECT rptdt, timetin.roid, archiveinv.type, '000' subcode, 'Direct Time', 
+       hours, 1 ctrsdef, 'T' timedef, 0 ctrsln
+FROM timetin, archiveinv
+WHERE subcode > '500'
+  AND month = (SELECT DISTINCT rptmnth FROM eom 
+               WHERE rptenddt = (SELECT MAX(rptenddt) FROM eom))
+  AND timetin.roid = archiveinv.roid
+
+UNION
+
+SELECT rptdt, timenon.roid, archiveinv.type, timecode, cdname, 
+       TO_NUMBER(hours), ctrsdef, entcode.timedef, ctrsln
+FROM timenon, entcode, archiveinv
+WHERE active IN ('Y','C')
+  AND timecode = code
+  AND ctrsdef <> 0
+  AND month = (SELECT DISTINCT rptmnth FROM eom 
+               WHERE rptenddt = (SELECT MAX(rptenddt) FROM eom))
+  AND entcode.type = 'T'
+  AND timenon.roid = archiveinv.roid
+
+UNION
+
+SELECT rptdt, timenon.roid, archiveinv.type, '613', 'LEAVE', 
+       TO_NUMBER(hours), 13, 'O', 55
+FROM timenon, entcode, archiveinv
+WHERE active IN ('Y','C')
+  AND timecode = code
+  AND timecode = '770'
+  AND ctrsdef = 0
+  AND month = (SELECT DISTINCT rptmnth FROM eom 
+               WHERE rptenddt = (SELECT MAX(rptenddt) FROM eom))
+  AND entcode.type = 'T'
+  AND timenon.roid = archiveinv.roid;

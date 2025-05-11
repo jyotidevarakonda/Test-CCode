@@ -1,0 +1,122 @@
+create or replace view timeview (rptdt, roid, type, code, cdname, hours,ctrsdef, timedef, ctrsln)
+	as
+
+(select rptdt, timetin.roid,archiveinv.type,subcode,cdname, 
+	hours, ctrsdef,timedef, ctrsln 
+	from timetin, entcode, archiveinv
+	where 
+	active in ('Y','C') and
+    subcode = entcode.code
+    and month = (select distinct rptmnth from eom where rptenddt =
+                (select max(rptenddt) from eom))
+    and timetin.roid = archiveinv.roid
+    and subcode <= '500'
+    and entcode.type = 'S'
+    and entcode.timedef in ('D','T')
+    and entcode.code not in ('106','107','309','310','311','312','313',
+                             '314','315','316','317','318','319')
+    and area = 1
+    and exists (select 1 from entmod where 
+                   timetin.roid = entmod.roid and
+                   timetin.timesid = entmod.emodsid and
+                   type in ('N','O','R','T','X','Y'))
+union all
+
+select rptdt, timetin.roid, archiveinv.type, '000' subcode,cdname, 
+	hours, 1 ctrsdef,
+       'T' timedef, 0 ctrsln 
+	from timetin, entcode, archiveinv
+	where 
+    active in ('Y','C') and
+    subcode = entcode.code
+    and month = (select distinct rptmnth from eom where rptenddt =
+                (select max(rptenddt) from eom))
+    
+    and timetin.roid = archiveinv.roid
+    and subcode <= '500'
+    and entcode.type = 'S'
+    and entcode.timedef = 'D'
+    and entcode.code not in ('106','107','309','310','311','312','313',
+                             '314','315','316','317','318','319')
+    and area = 1
+    and not exists (select 1 from entmod where 
+                   timetin.roid = entmod.roid and
+                   timetin.timesid = entmod.emodsid and
+                   type in ('N','O','R','T','X','Y'))
+union all
+
+select rptdt, timetin.roid, archiveinv.type, subcode,cdname, 
+	hours, ctrsdef,	timedef, ctrsln 
+	from timetin, entcode, archiveinv
+	where 
+        active in ('Y','C') and
+    subcode = entcode.code
+    and month = (select distinct rptmnth from eom where rptenddt =
+                (select max(rptenddt) from eom))
+    
+    and timetin.roid = archiveinv.roid
+    and subcode <= '500'
+    and entcode.type = 'S'
+    and entcode.timedef = 'D'
+    and entcode.code in ('106','107','309','310','311','312','313',
+                             '314','315','316','317','318','319')
+    and area = 1
+union all
+
+select rptdt, timetin.roid, archiveinv.type, '000' subcode,cdname, 
+	hours, ctrsdef,
+       timedef, ctrsln 
+	from timetin, entcode, archiveinv
+	where 
+        active in ('Y','C') and
+    subcode = entcode.code
+    and month = (select distinct rptmnth from eom where rptenddt =
+                (select max(rptenddt) from eom))
+    
+    and timetin.roid = archiveinv.roid
+    and subcode <= '500'
+    and entcode.type = 'S'
+    and entcode.timedef ^= 'D'
+    and area = 1
+    and not exists (select 1 from entmod where 
+                   timetin.roid = entmod.roid and
+                   timetin.timesid = entmod.emodsid and
+                   type in ('N','O','R','T','X','Y'))
+union all
+select rptdt, timetin.roid, archiveinv.type, '000' subcode, 'Direct Time', 
+	hours, 1 ctrsdef, 'T' timedef, 0 ctrsln
+    from timetin, archiveinv
+    where subcode > '500'
+    and month = (select distinct rptmnth from eom where rptenddt =
+                (select max(rptenddt) from eom))
+   
+    and timetin.roid = archiveinv.roid
+union all
+select rptdt, timenon.roid, archiveinv.type,timecode, cdname, 
+	to_number(hours),ctrsdef, entcode.timedef, ctrsln
+
+	from timenon, entcode, archiveinv
+	where 
+         active in ('Y','C') and 
+    timecode = code and ctrsdef ^= 0 
+    and month = (select distinct rptmnth from eom where rptenddt =
+                (select max(rptenddt) from eom))
+    
+    and entcode.type = 'T'
+    and timenon.roid = archiveinv.roid
+union all
+
+select rptdt, timenon.roid,archiveinv.type, '613','LEAVE', 
+	to_number(hours),13, 'O', 55
+
+	from timenon, entcode, archiveinv
+	where 
+     active in ('Y','C') and
+    timecode = code and
+    timecode = '770' and ctrsdef = 0 
+    and month = (select distinct rptmnth from eom where rptenddt =
+                (select max(rptenddt) from eom))
+    
+    and entcode.type = 'T'
+    and timenon.roid = archiveinv.roid)
+/

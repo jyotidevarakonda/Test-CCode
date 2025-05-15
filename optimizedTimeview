@@ -58,3 +58,57 @@ WHERE t.active IN ('Y','C')
   AND t.code NOT IN ('106','107','309','310','311','312','313','314','315','316','317','318','319')
   AND a.month = (SELECT rptmnth FROM latest_month)
   AND NOT EXISTS (
+      SELECT 1 FROM entmod m
+      WHERE t.roid = m.roid AND t.timesid = m.emodsid AND m.type IN ('N','O','R','T','X','Y')
+)
+
+UNION ALL
+
+SELECT t.rptdt, t.roid, a.type, t.subcode, t.cdname, t.hours, t.ctrsdef, t.timedef, t.ctrsln
+FROM base_timetin t
+JOIN archiveinv a ON t.roid = a.roid
+WHERE t.active IN ('Y','C')
+  AND t.timedef = 'D'
+  AND t.code IN ('106','107','309','310','311','312','313','314','315','316','317','318','319')
+  AND a.month = (SELECT rptmnth FROM latest_month)
+
+UNION ALL
+
+SELECT t.rptdt, t.roid, a.type, '000', t.cdname, t.hours, t.ctrsdef, t.timedef, t.ctrsln
+FROM base_timetin t
+JOIN archiveinv a ON t.roid = a.roid
+WHERE t.active IN ('Y','C')
+  AND t.timedef <> 'D'
+  AND a.month = (SELECT rptmnth FROM latest_month)
+  AND NOT EXISTS (
+      SELECT 1 FROM entmod m
+      WHERE t.roid = m.roid AND t.timesid = m.emodsid AND m.type IN ('N','O','R','T','X','Y')
+)
+
+UNION ALL
+
+SELECT t.rptdt, t.roid, a.type, '000', 'Direct Time', t.hours, 1, 'T', 0
+FROM timetin t
+JOIN archiveinv a ON t.roid = a.roid
+WHERE t.subcode > '500'
+  AND a.month = (SELECT rptmnth FROM latest_month)
+
+UNION ALL
+
+SELECT t.rptdt, t.roid, a.type, t.timecode, t.cdname, TO_NUMBER(t.hours), t.ctrsdef, t.timedef, t.ctrsln
+FROM base_timenon t
+JOIN archiveinv a ON t.roid = a.roid
+WHERE t.active IN ('Y','C')
+  AND t.ctrsdef <> 0
+  AND a.month = (SELECT rptmnth FROM latest_month)
+
+UNION ALL
+
+SELECT t.rptdt, t.roid, a.type, '613', 'LEAVE', TO_NUMBER(t.hours), 13, 'O', 55
+FROM timenon t
+JOIN entcode e ON t.timecode = e.code
+JOIN archiveinv a ON t.roid = a.roid
+WHERE t.active IN ('Y','C')
+  AND t.timecode = '770'
+  AND e.ctrsdef = 0
+  AND a.month = (SELECT rptmnth FROM latest_month);

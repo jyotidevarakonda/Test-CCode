@@ -1,0 +1,99 @@
+WITH latest_month AS (
+    SELECT rptmnth 
+    FROM eom 
+    WHERE rptenddt = (SELECT MAX(rptenddt) FROM eom)
+),
+base_timetin AS (
+    SELECT t.*, e.code, e.cdname, e.timedef, e.ctrsdef, e.ctrsln
+    FROM timetin t
+    JOIN entcode e ON t.subcode = e.code
+    WHERE e.type = 'S' AND e.code <= '500' AND area = 1
+),
+base_timenon AS (
+    SELECT tn.*, e.cdname, e.timedef, e.ctrsdef, e.ctrsln
+    FROM timenon tn
+    JOIN entcode e ON tn.timecode = e.code
+    WHERE e.type = 'T'
+)
+-- Now build the main query
+SELECT t.rptdt, t.roid, a.type, t.subcode, t.cdname, t.hours, t.ctrsdef, t.timedef, t.ctrsln
+FROM base_timetin t
+JOIN archiveinv a ON t.roid = a.roid
+WHERE t.active IN ('Y','C')
+  AND t.timedef IN ('D','T')
+  AND t.code NOT IN ('106','107','309','310','311','312','313','314','315','316','317','318','319')
+  AND t.month = (SELECT rptmnth FROM latest_month)
+  AND EXISTS (
+      SELECT 1 FROM entmod m
+      WHERE t.roid = m.roid AND t.timesid = m.emodsid AND m.type IN ('N','O','R','T','X','Y')
+)
+
+UNION ALL
+
+SELECT t.rptdt, t.roid, a.type, '000', t.cdname, t.hours, 1, 'T', 0
+FROM base_timetin t
+JOIN archiveinv a ON t.roid = a.roid
+WHERE t.active IN ('Y','C')
+  AND t.timedef = 'D'
+  AND t.code NOT IN ('106','107','309','310','311','312','313','314','315','316','317','318','319')
+  AND t.month = (SELECT rptmnth FROM latest_month)
+  AND NOT EXISTS (
+      SELECT 1 FROM entmod m
+      WHERE t.roid = m.roid AND t.timesid = m.emodsid AND m.type IN ('N','O','R','T','X','Y')
+)
+
+UNION ALL
+
+-- Direct entcode values only
+SELECT t.rptdt, t.roid, a.type, t.subcode, t.cdname, t.hours, t.ctrsdef, t.timedef, t.ctrsln
+FROM base_timetin t
+JOIN archiveinv a ON t.roid = a.roid
+WHERE t.active IN ('Y','C')
+  AND t.timedef = 'D'
+  AND t.code IN ('106','107','309','310','311','312','313','314','315','316','317','318','319')
+  AND t.month = (SELECT rptmnth FROM latest_month)
+
+UNION ALL
+
+-- Time definitions other than D with no entmod entry
+SELECT t.rptdt, t.roid, a.type, '000', t.cdname, t.hours, t.ctrsdef, t.timedef, t.ctrsln
+FROM base_timetin t
+JOIN archiveinv a ON t.roid = a.roid
+WHERE t.active IN ('Y','C')
+  AND t.timedef <> 'D'
+  AND t.month = (SELECT rptmnth FROM latest_month)
+  AND NOT EXISTS (
+      SELECT 1 FROM entmod m
+      WHERE t.roid = m.roid AND t.timesid = m.emodsid AND m.type IN ('N','O','R','T','X','Y')
+)
+
+UNION ALL
+
+-- Subcode > 500
+SELECT t.rptdt, t.roid, a.type, '000', 'Direct Time', t.hours, 1, 'T', 0
+FROM timetin t
+JOIN archiveinv a ON t.roid = a.roid
+WHERE t.subcode > '500'
+  AND t.month = (SELECT rptmnth FROM latest_month)
+
+UNION ALL
+
+-- Non-zero ctrsdef
+SELECT t.rptdt, t.roid, a.type, t.timecode, t.cdname, TO_NUMBER(t.hours), t.ctrsdef, t.timedef, t.ctrsln
+FROM base_timenon t
+JOIN archiveinv a ON t.roid = a.roid
+WHERE t.active IN ('Y','C')
+  AND t.ctrsdef <> 0
+  AND t.month = (SELECT rptmnth FROM latest_month)
+
+UNION ALL
+
+-- Special hardcoded 770
+SELECT t.rptdt, t.roid, a.type, '613', 'LEAVE', TO_NUMBER(t.hours), 13, 'O', 55
+FROM timenon t
+JOIN entcode e ON t.timecode = e.code
+JOIN archiveinv a ON t.roid = a.roid
+WHERE t.active IN ('Y','C')
+  AND t.timecode = '770'
+  AND e.ctrsdef = 0
+  AND t.month = (SELECT rptmnth FROM latest_month);

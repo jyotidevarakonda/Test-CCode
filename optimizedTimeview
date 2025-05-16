@@ -1,75 +1,87 @@
 WITH latest_month AS (
-    SELECT MAX(rptenddt) AS max_rptenddt FROM eom
-),
-latest_rptmnth AS (
     SELECT rptmnth 
     FROM eom 
-    WHERE rptenddt = (SELECT max_rptenddt FROM latest_month)
+    WHERE rptenddt = (SELECT MAX(rptenddt) FROM eom)
 )
-SELECT 
-    COALESCE(ti.rptdt, tn.rptdt) AS rptdt,
-    COALESCE(ti.roid, tn.roid) AS roid,
+SELECT
+    ti.rptdt,
+    ti.roid,
     ai.type,
-    -- CASE logic to determine subcode
+
+    -- Subcode: '000' if > 500, else actual
     CASE 
-        WHEN ti.subcode > '500' THEN '000'
-        WHEN tn.timecode = '770' AND ec_t.ctrsdef = 0 THEN '613'
-        WHEN ti.timedef <> 'D' AND em.roid IS NULL THEN '000'
-        WHEN em.roid IS NULL AND ti.timedef = 'D' THEN '000'
-        ELSE COALESCE(ti.subcode, tn.timecode)
+        WHEN ti.subcode > '500' THEN '000' 
+        ELSE ti.subcode 
     END AS subcode,
-    
-    -- CASE logic to determine cdname
+
+    -- cdname: 'Direct Time' if > 500, else from entcode
     CASE 
         WHEN ti.subcode > '500' THEN 'Direct Time'
-        WHEN tn.timecode = '770' AND ec_t.ctrsdef = 0 THEN 'LEAVE'
-        ELSE COALESCE(ec_s.cdname, ec_t.cdname)
+        ELSE ec.cdname 
     END AS cdname,
 
-    -- Hours with conversion where necessary
-    CASE 
-        WHEN tn.hours IS NOT NULL THEN TO_NUMBER(tn.hours)
-        ELSE ti.hours
-    END AS hours,
+    ti.hours,
 
-    -- CASE for ctrsdef
+    -- ctrsdef: 1 if > 500, else from entcode
     CASE 
-        WHEN ti.subcode > '500' THEN 1
-        WHEN tn.timecode = '770' THEN 13
-        WHEN em.roid IS NULL AND ti.timedef = 'D' THEN 1
-        ELSE COALESCE(ec_s.ctrsdef, ec_t.ctrsdef)
+        WHEN ti.subcode > '500' THEN 1 
+        ELSE ec.ctrsdef 
     END AS ctrsdef,
 
-    -- CASE for timedef
+    -- timedef: 'T' if > 500, else from entcode
     CASE 
-        WHEN ti.subcode > '500' THEN 'T'
-        WHEN tn.timecode = '770' THEN 'O'
-        WHEN em.roid IS NULL AND ti.timedef = 'D' THEN 'T'
-        ELSE COALESCE(ec_s.timedef, ec_t.timedef)
+        WHEN ti.subcode > '500' THEN 'T' 
+        ELSE ec.timedef 
     END AS timedef,
 
-    -- CASE for ctrsln
+    -- ctrsln: 0 if > 500, else from entcode
     CASE 
-        WHEN ti.subcode > '500' THEN 0
-        WHEN tn.timecode = '770' THEN 55
-        WHEN em.roid IS NULL AND ti.timedef = 'D' THEN 0
-        ELSE COALESCE(ec_s.ctrsln, ec_t.ctrsln)
+        WHEN ti.subcode > '500' THEN 0 
+        ELSE ec.ctrsln 
     END AS ctrsln
 
-FROM archiveinv ai
-LEFT JOIN timetin ti ON ai.roid = ti.roid 
-    AND EXISTS (SELECT 1 FROM latest_rptmnth WHERE rptmnth = ai.month)
-LEFT JOIN timenon tn ON ai.roid = tn.roid 
-    AND EXISTS (SELECT 1 FROM latest_rptmnth WHERE rptmnth = ai.month)
-LEFT JOIN entcode ec_s ON ti.subcode = ec_s.code AND ec_s.type = 'S' AND ec_s.code <= '500'
-LEFT JOIN entcode ec_t ON tn.timecode = ec_t.code AND ec_t.type = 'T'
-LEFT JOIN entmod em ON ti.roid = em.roid AND ti.timesid = em.emodsid 
+FROM timetin ti
+
+LEFT JOIN entcode ec
+    ON ti.subcode = ec.code
+    AND ec.type = 'S'
+
+JOIN archiveinv ai
+    ON ti.roid = ai.roid
+
+LEFT JOIN entmod em
+    ON ti.roid = em.roid
+    AND ti.timesid = em.emodsid
     AND em.type IN ('N','O','R','T','X','Y')
 
-WHERE 
-    (
-        (ti.subcode IS NOT NULL AND ec_s.active IN ('Y','C') AND ec_s.timedef IN ('D','T')
-         AND ec_s.code NOT IN ('106','107','309','310','311','312','313','314','315','316','317','318','319') AND ai.area = 1)
-        OR (ti.subcode > '500')
-        OR (tn.timecode IS NOT NULL AND ec_t.active IN ('Y','C'))
+WHERE
+    ai.month = (SELECT rptmnth FROM latest_month)
+    AND (
+        (ti.subcode <= '500' AND ec.code IS NOT NULL)
+        OR ti.subcode > '500'
+    )
+    AND (
+        -- Include rows with entmod OR exclude based on entmod presence
+        (
+            ec.timedef IN ('D','T')
+            AND ec.code NOT IN ('106','107','309','310','311','312','313','314','315','316','317','318','319')
+            AND ec.ctrsdef IS NOT NULL
+            AND (
+                (em.roid IS NOT NULL) OR
+                (em.roid IS NULL AND ec.timedef = 'D')
+            )
+        )
+        OR ti.subcode > '500'
+        OR (
+            ec.code IN ('106','107','309','310','311','312','313','314','315','316','317','318','319')
+        )
+        OR (
+            ec.timedef <> 'D' AND em.roid IS NULL
+        )
+    )
+    AND (
+        ti.subcode > '500'
+        OR (
+            ec.active IN ('Y','C') AND ai.active IN ('Y','C') AND area = 1
+        )
     )

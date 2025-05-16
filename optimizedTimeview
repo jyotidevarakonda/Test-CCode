@@ -9,18 +9,19 @@ SELECT
     t.roid,
     a.type,
 
-    -- 🛠️ Fixed subcode logic with proper handling of '000' and LEAVE
+    -- Correct subcode logic
     CASE 
-        WHEN t.timecode = '770' THEN '613'
+        WHEN t.code IN ('106','107','309','310','311','312','313','314','315','316','317','318','319') THEN t.subcode
         WHEN ec.type = 'S' AND t.subcode <= '500' AND m.roid IS NULL THEN '000'
         WHEN t.subcode > '500' THEN '000'
-        WHEN ec.type = 'T' THEN t.timecode
+        WHEN tn.timecode = '770' THEN '613'
+        WHEN ec.type = 'T' THEN tn.timecode
         ELSE t.subcode
     END AS subcode,
 
-    -- cdname logic
+    -- cdname
     CASE 
-        WHEN t.timecode = '770' THEN 'LEAVE'
+        WHEN tn.timecode = '770' THEN 'LEAVE'
         WHEN t.subcode > '500' THEN 'Direct Time'
         WHEN ec.cdname IS NOT NULL THEN ec.cdname
         ELSE ec2.cdname
@@ -28,25 +29,25 @@ SELECT
 
     TO_NUMBER(t.hours) AS hours,
 
-    -- ctrsdef logic
+    -- ctrsdef
     CASE 
-        WHEN t.timecode = '770' THEN 13
+        WHEN tn.timecode = '770' THEN 13
         WHEN t.subcode > '500' THEN 1
         WHEN ec.ctrsdef IS NOT NULL THEN ec.ctrsdef
         ELSE ec2.ctrsdef
     END AS ctrsdef,
 
-    -- timedef logic
+    -- timedef
     CASE 
-        WHEN t.timecode = '770' THEN 'O'
+        WHEN tn.timecode = '770' THEN 'O'
         WHEN t.subcode > '500' THEN 'T'
         WHEN ec.timedef IS NOT NULL THEN ec.timedef
         ELSE ec2.timedef
     END AS timedef,
 
-    -- ctrsln logic
+    -- ctrsln
     CASE 
-        WHEN t.timecode = '770' THEN 55
+        WHEN tn.timecode = '770' THEN 55
         WHEN t.subcode > '500' THEN 0
         WHEN ec.ctrsln IS NOT NULL THEN ec.ctrsln
         ELSE ec2.ctrsln
@@ -54,25 +55,14 @@ SELECT
 
 FROM timetin t
 
--- For subcode ≤ 500
 LEFT JOIN entcode ec ON t.subcode = ec.code AND ec.type = 'S'
-
--- For timecode from timenon
 LEFT JOIN timenon tn ON t.roid = tn.roid AND t.timesid = tn.timesid
 LEFT JOIN entcode ec2 ON tn.timecode = ec2.code AND ec2.type = 'T'
-
--- entmod match
 LEFT JOIN entmod m ON t.roid = m.roid AND t.timesid = m.emodsid AND m.type IN ('N','O','R','T','X','Y')
-
 JOIN archiveinv a ON t.roid = a.roid
 
--- Filters
+-- Final filter
 WHERE a.month = (SELECT rptmnth FROM latest_month)
   AND (
-      -- include records with valid subcode/timecode info
-      ec.code IS NOT NULL OR t.subcode > '500' OR t.timecode = '770' OR (ec2.ctrsdef IS NOT NULL AND ec2.ctrsdef <> 0)
-  )
-  AND (
-      -- active either in entcode or entcode2
       ec.active IN ('Y','C') OR ec2.active IN ('Y','C')
   )

@@ -7,8 +7,8 @@ WITH latest_month AS (
 SELECT DISTINCT *
 FROM (
     SELECT DISTINCT
-        rptdt,
-        roid,
+        t.rptdt,
+        t.roid,
         a.type,
         CASE
             WHEN e.type = 'S' AND e.timedef IN ('D','T') AND e.code NOT IN (
@@ -31,7 +31,7 @@ FROM (
             WHEN e.code > '500' THEN 'Direct Time'
             ELSE NULL
         END AS cdname,
-        hours,
+        t.hours,
         CASE
             WHEN e.type = 'S' AND e.code <= '500' THEN e.ctrsdef
             WHEN e.code > '500' THEN 1
@@ -47,73 +47,73 @@ FROM (
             WHEN e.code > '500' THEN 0
             ELSE NULL
         END AS ctrsln
-    FROM timetin
-    JOIN entcode e ON timetin.subcode = e.code
-    JOIN archiveinv a ON timetin.roid = a.roid
-    LEFT JOIN entmod em ON timetin.roid = em.roid AND timetin.timesid = em.emodsid AND em.type IN ('N','O','R','T','X','Y')
+    FROM timetin t
+    JOIN entcode e ON t.subcode = e.code
+    JOIN archiveinv a ON t.roid = a.roid
+    LEFT JOIN entmod em ON t.roid = em.roid AND t.timesid = em.emodsid AND em.type IN ('N','O','R','T','X','Y')
     WHERE e.active IN ('Y','C')
       AND e.type = 'S'
-      AND timetin.subcode <= '500'
+      AND t.subcode <= '500'
       AND e.timedef IN ('D','T')
-      AND area = 1
-      AND timetin.month = (SELECT rptmnth FROM latest_month)
+      AND t.area = 1
+      AND t.month = (SELECT rptmnth FROM latest_month)
 
     UNION ALL
 
     SELECT DISTINCT
-        rptdt,
-        roid,
+        t.rptdt,
+        t.roid,
         a.type,
         '000' AS subcode,
         'Direct Time' AS cdname,
-        hours,
+        t.hours,
         1 AS ctrsdef,
         'T' AS timedef,
         0 AS ctrsln
-    FROM timetin
-    JOIN archiveinv a ON timetin.roid = a.roid
-    WHERE timetin.subcode > '500'
-      AND timetin.month = (SELECT rptmnth FROM latest_month)
+    FROM timetin t
+    JOIN archiveinv a ON t.roid = a.roid
+    WHERE t.subcode > '500'
+      AND t.month = (SELECT rptmnth FROM latest_month)
 
     UNION ALL
 
     SELECT DISTINCT
-        rptdt,
-        roid,
+        n.rptdt,
+        n.roid,
         a.type,
         e.code,
         e.cdname,
-        TO_NUMBER(hours),
+        TO_NUMBER(n.hours),
         e.ctrsdef,
         e.timedef,
         e.ctrsln
-    FROM timenon
-    JOIN entcode e ON timenon.timecode = e.code
-    JOIN archiveinv a ON timenon.roid = a.roid
+    FROM timenon n
+    JOIN entcode e ON n.timecode = e.code
+    JOIN archiveinv a ON n.roid = a.roid
     WHERE e.active IN ('Y','C')
       AND e.type = 'T'
       AND e.ctrsdef != 0
-      AND timenon.month = (SELECT rptmnth FROM latest_month)
+      AND n.month = (SELECT rptmnth FROM latest_month)
 
     UNION ALL
 
     SELECT DISTINCT
-        rptdt,
-        roid,
+        n.rptdt,
+        n.roid,
         a.type,
         '613' AS subcode,
         'LEAVE' AS cdname,
-        TO_NUMBER(hours),
+        TO_NUMBER(n.hours),
         13 AS ctrsdef,
         'O' AS timedef,
         55 AS ctrsln
-    FROM timenon
-    JOIN entcode e ON timenon.timecode = e.code
-    JOIN archiveinv a ON timenon.roid = a.roid
+    FROM timenon n
+    JOIN entcode e ON n.timecode = e.code
+    JOIN archiveinv a ON n.roid = a.roid
     WHERE e.active IN ('Y','C')
-      AND timenon.timecode = '770'
+      AND n.timecode = '770'
       AND e.ctrsdef = 0
       AND e.type = 'T'
-      AND timenon.month = (SELECT rptmnth FROM latest_month)
+      AND n.month = (SELECT rptmnth FROM latest_month)
 )
 WHERE ROWNUM < 1000;

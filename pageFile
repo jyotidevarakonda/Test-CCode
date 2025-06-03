@@ -1,0 +1,188 @@
+'use client'
+
+import { Table } from "@trussworks/react-uswds";
+import { convertTableHeaders, createDefaultSort } from "@/utils/tableUtils";
+import PageNavigation from "../../../components/PageNavigation/PageNavigation";
+
+import "./query.css"
+import { KeyboardEvent, useEffect, useState } from "react";
+import { randomBytes } from "crypto";
+import CaseAssignmentSideBar from "@/app/case-assignment-intl/CaseAssignmentSideBar/CaseAssignmentSideBar";
+import { useRouter } from "next/navigation";
+import { useDispatch } from "react-redux";
+import { AppDispatch } from "@/redux/store";
+import { QueryRow } from "@/model/Query";
+
+
+import GroupSummaryController from "@/services/controller/GroupSummaryController";
+import QueryUITable from "@/app/components/queryUi/QueryUITable";
+
+function  Query() {
+    const router = useRouter();
+
+    const dispatch = useDispatch<AppDispatch>();
+    const queryProperties = [
+        {
+            "isLink": false,
+            "pageName": "Case Assignment Intl",
+            "urlString": ""
+        },
+        {
+            "isLink": false,
+            "pageName": "Group Summary",
+            "urlString": ""
+        },
+      ];
+
+
+
+      type QueryRow1 ={
+        potentialAssignmentNumber: string;
+        tin: string;
+        taxpayerName: string;
+        balanceDue: string;
+        priorityAlpha: string;
+        dateAssignedQueue: string;
+        zipCode: string;
+        xaddrState: string;
+        caseGrade: number;
+        caseType: string;
+        tinFileSource: string;
+        hinfAnd941Indicator: string;
+        countModulesTota: string;
+        fatcaIndicator: string;
+        statueIndicator: string;
+        assignmentNumber: string;
+        flagQueuePick: string;
+        queuePickDate: string;
+    };
+
+
+
+    //converted headers that are readable for the table
+    const headers: { [key: string]: string } = {
+      "potentialAssignmentNumber":"Potential Assignment Number",
+      "tin": "TIN",
+      "taxpayerName": "Taxpayer Name",
+      "balanceDue": "Balance Due",
+      "priorityAlpha": "Priority Alpha",
+      "dateAssignedQueue": "Date Assigned Queue",
+      "xaddrState":  "XADDR State",
+      "zipCode": "Zip Code" ,
+      "caseGrade": "Case Grade",
+      "caseType":"Case Type" ,
+      "tinFileSource": "TIN File Source" ,
+      "hinfAnd941Indicator": "HINF & 941 Indicator",
+      "countModulesTota": "Count Modules Tota",
+      "fatcaIndicator": "Fatca Indicator",
+      "statueIndicator": "Statue Indicator" ,
+      "assignmentNumber": "Assignment Number" ,
+      "flagQueuePick": "Flag Queue Pick" ,
+      "queuePickDate": "Queue Pick Date"
+ }
+
+
+
+
+
+
+
+   // const [tableData, setTableData] = useState<QueryRow[]>([]);
+   //const [tableData, setTableData] = useState<tableRow[]>(tempTableData);
+   const [tableData, setTableData] = useState<QueryRow1[]>([]);
+    const [filterField, setFilterField] = useState('');
+    //const [filterValue, setFilterValue] = useState('');
+    //const [filteredData, setFilteredData] = useState(tableData);
+    const [loading , setLoading] = useState(true);
+    const [filteredData, setFilteredData] = useState(tableData);
+    const [error, setError] = useState<String | null> (null);
+    const [sortConfig, setSortConfig] = useState<{ key: keyof QueryRow | null; direction: "asc" | "desc" | null }>({
+      key: null,
+      direction: null,
+    });
+
+    const [defaultSort, setDefaultSort] = useState<Record<string, any>[]>([]);
+    const [resetDefaultSort, setResetDefaultSort] = useState<Record<string, any>[]>([]);
+    //console.log(tableData.length);
+
+    const [hoveredColumn, setHoveredColumn] = useState<keyof QueryRow | null>(null);
+    const fields = tableData.length > 0 ? Object.keys(tableData[0]) : [];
+    const uniqueValues = filterField
+      ? [...new Set(tableData.map(item => item[filterField as keyof QueryRow]))]
+      : [];
+
+
+
+    const renderSortIndicator = (columnKey: keyof QueryRow) => {
+      if (sortConfig.key === columnKey) {
+        return sortConfig.direction === "asc" ? "↓" : "↑";
+      }
+      return hoveredColumn === columnKey ? "↕" : ""; // Show double arrow only on hover
+    };
+
+     const requestSort = (key: keyof QueryRow) => {
+        let direction: "asc" | "desc" | null = "asc";
+
+        if (sortConfig.key === key) {
+          direction = sortConfig.direction === "asc" ? "desc" : sortConfig.direction === "desc" ? null : "asc";
+        }
+
+        setSortConfig({ key: direction ? key : null, direction });
+      };
+
+    // API call
+    useEffect(() => {
+      const fetchData = async () => {
+        try {
+          const response = await GroupSummaryController.getQueryUIEgregious941CasesIntl();
+          console.log("response", response);
+          if (response.status === 200) {
+            setTableData(response.data);
+            setFilteredData(response.data);
+          }
+        } catch {
+
+        } finally {
+           setLoading(false);
+        }
+      }
+
+      fetchData();
+
+    }, []);
+
+
+
+
+    return (
+           <>
+            <PageNavigation title={`Egregious 941`} pageNameProperties={queryProperties}/>
+
+            <div className="content-container min-height-300">
+              <div className="flex-row margin-top-16-px">
+                 <div className="width-20">
+                        <CaseAssignmentSideBar selectedDiv="941Intl"/>
+                 </div>
+
+                 <div className="query-table-container">
+                   <div className="query-table-overflow">
+
+                   <div className="case-view-table-overflow">
+                    {filteredData.length >0 &&
+                       <QueryUITable data={ convertTableHeaders(headers, filteredData) as QueryRow[] } isClickable={true}/>
+                    }
+
+                    {loading } <div>Loading...</div>
+                    {error}  <div style={{ color: "red"}}>Error: {error}</div>
+                    {filteredData.length ===0 &&
+                       <div> <h2>Loading...</h2></div>
+                    }
+                    </div>
+                    </div>
+
+       </div>
+      </div>
+     </div>
+     </>
+    );
+  };

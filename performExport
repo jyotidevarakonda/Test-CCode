@@ -1,0 +1,57 @@
+private boolean performExport(Path expDir, String exportFileName, BufferedWriter logWriter) throws IOException {
+    logger.info("Performing JDBC export: {}", exportFileName);
+
+    String today = LocalDate.now().format(DateTimeFormatter.ofPattern(dateFormat));
+    Path exportFile = expDir.resolve(exportFileName + "." + today + ".csv");
+
+    // Param file contains SQL query
+    String exportParamFile = exportFileName.replace(".exp", "").toUpperCase() + "_PAR";
+    Path paramFilePath = Paths.get(dialEnv.getOrDefault("DIAL", "."), "param", exportParamFile);
+
+    if (!Files.exists(paramFilePath)) {
+        logWriter.write("ERROR: Parameter file not found: " + paramFilePath);
+        logWriter.newLine();
+        return false;
+    }
+
+    String sqlQuery = Files.readString(paramFilePath).trim();
+
+    try (BufferedWriter writer = Files.newBufferedWriter(exportFile)) {
+        jdbcTemplate.query(sqlQuery, rs -> {
+            ResultSetMetaData meta = rs.getMetaData();
+            int columnCount = meta.getColumnCount();
+
+            // Write header
+            for (int i = 1; i <= columnCount; i++) {
+                writer.write(meta.getColumnName(i));
+                if (i < columnCount) writer.write(",");
+            }
+            writer.newLine();
+
+            // Write rows
+            do {
+                for (int i = 1; i <= columnCount; i++) {
+                    String val = rs.getString(i);
+                    writer.write(val != null ? val.replace(",", "\\,") : "");
+                    if (i < columnCount) writer.write(",");
+                }
+                writer.newLine();
+            } while (rs.next());
+        });
+    } catch (Exception e) {
+        logger.error("Export failed", e);
+        logWriter.write("Export failed: " + e.getMessage());
+        logWriter.newLine();
+        return false;
+    }
+
+    if (compressExports) {
+        Path compressedFile = compressFile(exportFile);
+        logWriter.write("Compressed export file: " + compressedFile);
+        logWriter.newLine();
+    }
+
+    logWriter.write("Export completed successfully: " + exportFileName);
+    logWriter.newLine();
+    return true;
+}

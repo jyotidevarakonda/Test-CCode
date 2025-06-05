@@ -1,0 +1,124 @@
+// --- Spring Batch Configuration for Step 1 Architecture ---
+
+@Configuration
+@EnableBatchProcessing
+public class Step1BatchConfig {
+
+    @Autowired
+    private JobBuilderFactory jobBuilderFactory;
+
+    @Autowired
+    private StepBuilderFactory stepBuilderFactory;
+
+    @Autowired
+    private DCrRawService dCrRawService;
+
+    @Autowired
+    private DTableStatsService dTableStatsService;
+
+    @Autowired
+    private DExportsService dExportsService;
+
+    @Autowired
+    private DSyncService dSyncService;
+
+    @Bean
+    public Job step1Job() {
+        return jobBuilderFactory.get("step1Job")
+                .start(crrawStep())
+                .next(statsStep())
+                .next(exportsStep())
+                .next(syncStep())
+                .build();
+    }
+
+    @Bean
+    public Step crrawStep() {
+        return stepBuilderFactory.get("crrawStep")
+                .tasklet((contribution, chunkContext) -> {
+                    dCrRawService.execute();
+                    return RepeatStatus.FINISHED;
+                }).build();
+    }
+
+    @Bean
+    public Step statsStep() {
+        return stepBuilderFactory.get("statsStep")
+                .tasklet((contribution, chunkContext) -> {
+                    dTableStatsService.execute();
+                    return RepeatStatus.FINISHED;
+                }).build();
+    }
+
+    @Bean
+    public Step exportsStep() {
+        return stepBuilderFactory.get("exportsStep")
+                .tasklet((contribution, chunkContext) -> {
+                    dExportsService.execute();
+                    return RepeatStatus.FINISHED;
+                }).build();
+    }
+
+    @Bean
+    public Step syncStep() {
+        return stepBuilderFactory.get("syncStep")
+                .tasklet((contribution, chunkContext) -> {
+                    dSyncService.execute();
+                    return RepeatStatus.FINISHED;
+                }).build();
+    }
+}
+
+// --- Orchestrator Service ---
+
+@Service
+public class DStep1OrchestratorService {
+
+    @Autowired
+    private JobLauncher jobLauncher;
+
+    @Autowired
+    private Job step1Job;
+
+    public void executeStep1Operations() throws Exception {
+        JobParameters jobParameters = new JobParametersBuilder()
+                .addLong("timestamp", System.currentTimeMillis())
+                .toJobParameters();
+
+        jobLauncher.run(step1Job, jobParameters);
+    }
+
+    public void executeStep1Operation(String step) throws Exception {
+        switch (step.toLowerCase()) {
+            case "crraw":
+                dCrRawService.execute();
+                break;
+            case "stats":
+                dTableStatsService.execute();
+                break;
+            case "exports":
+                dExportsService.execute();
+                break;
+            case "sync":
+                dSyncService.execute();
+                break;
+            default:
+                throw new IllegalArgumentException("Unknown step: " + step);
+        }
+    }
+
+    @Autowired
+    private DCrRawService dCrRawService;
+
+    @Autowired
+    private DTableStatsService dTableStatsService;
+
+    @Autowired
+    private DExportsService dExportsService;
+
+    @Autowired
+    private DSyncService dSyncService;
+}
+
+// Add similar skeletons for DCrRawService, DTableStatsService, DExportsService, and DSyncService
+// Each should have an `execute()` method containing the core logic for its respective operation.

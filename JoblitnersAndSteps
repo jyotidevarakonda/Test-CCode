@@ -1,0 +1,226 @@
+@Configuration
+@EnableBatchProcessing
+@RequiredArgsConstructor
+public class BatchJobConfig {
+
+    private final JobBuilderFactory jobBuilderFactory;
+    private final StepBuilderFactory stepBuilderFactory;
+
+    private final DCrRawService dCrRawService;
+    private final DTableStatsService dTableStatsService;
+    private final DExportsService dExportsService;
+    private final DSyncService dSyncService;
+
+    private final DialStepListener stepListener;
+    private final DialJobListener jobListener;
+
+    @Bean
+    public Job dialETLJob() {
+        return jobBuilderFactory.get("dialETLJob")
+                .incrementer(new RunIdIncrementer())
+                .listener(jobListener)
+                .start(crRawStep())
+                .next(statsStep())
+                .next(exportsStep())
+                .next(syncStep())
+                .build();
+    }
+
+    @Bean
+    public Step crRawStep() {
+        return stepBuilderFactory.get("crRawStep")
+                .tasklet((contribution, chunkContext) -> {
+                    dCrRawService.processFiles(); // assumes service encapsulates reader + writer logic
+                    return RepeatStatus.FINISHED;
+                })
+                .listener(stepListener)
+                .build();
+    }
+
+    @Bean
+    public Step statsStep() {
+        return stepBuilderFactory.get("statsStep")
+                .tasklet((contribution, chunkContext) -> {
+                    dTableStatsService.executeStats();
+                    return RepeatStatus.FINISHED;
+                })
+                .listener(stepListener)
+                .build();
+    }
+
+    @Bean
+    public Step exportsStep() {
+        return stepBuilderFactory.get("exportsStep")
+                .tasklet((contribution, chunkContext) -> {
+                    dExportsService.performExports();
+                    return RepeatStatus.FINISHED;
+                })
+                .listener(stepListener)
+                .build();
+    }
+
+    @Bean
+    public Step syncStep() {
+        return stepBuilderFactory.get("syncStep")
+                .tasklet((contribution, chunkContext) -> {
+                    dSyncService.synchronize();
+                    return RepeatStatus.FINISHED;
+                })
+                .listener(stepListener)
+                .build();
+    }
+}
+
+
+//////////////////////////////////////////////////////////////////////
+
+
+@Component
+public class DialJobListener implements JobExecutionListener {
+
+    private static final Logger logger = LoggerFactory.getLogger(DialJobListener.class);
+
+    @Override
+    public void beforeJob(JobExecution jobExecution) {
+        logger.info("Validating environment and configuration before job...");
+
+        // Example checks:
+        assertDirectoryExists("/data/input");
+        assertDirectoryExists("/data/output");
+        validateConfig("ORACLE_HOME");
+        validateDBConnection();
+    }
+
+    private void assertDirectoryExists(String path) {
+        Path dir = Paths.get(path);
+        if (!Files.exists(dir)) {
+            throw new RuntimeException("Missing required directory: " + path);
+        }
+    }
+
+    private void validateConfig(String key) {
+        String value = System.getenv(key);
+        if (value == null || value.isBlank()) {
+            throw new RuntimeException("Missing environment variable: " + key);
+        }
+    }
+
+    private void validateDBConnection() {
+        // Try test query with JdbcTemplate or DataSource
+        logger.info("Database connection validated.");
+    }
+
+    @Override
+    public void afterJob(JobExecution jobExecution) {
+        logger.info("Batch job completed with status: {}", jobExecution.getStatus());
+    }
+}
+/////////////////////////////////////////////////////////////////////////////////////
+
+@Component
+public class DialStepListener implements StepExecutionListener {
+
+    private static final Logger logger = LoggerFactory.getLogger(DialStepListener.class);
+
+    @Override
+    public void beforeStep(StepExecution stepExecution) {
+        logger.info("Starting step: {}", stepExecution.getStepName());
+    }
+
+    @Override
+    public ExitStatus afterStep(StepExecution stepExecution) {
+        logger.info("Finished step: {} with status: {}", stepExecution.getStepName(), stepExecution.getStatus());
+        return stepExecution.getExitStatus();
+    }
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+@Configuration
+@RequiredArgsConstructor
+public class BatchPartitionJobConfig {
+
+    private final JobBuilderFactory jobBuilderFactory;
+    private final StepBuilderFactory stepBuilderFactory;
+
+    private final FileReader fileReader;
+    private final ComboWriter comboWriter;
+    private final FilePartitioner filePartitioner;
+
+    private final DialJobListener jobListener;
+    private final DialStepListener stepListener;
+
+    @Bean
+    public Job dialETLJob() {
+        return jobBuilderFactory.get("dialETLJob")
+                .incrementer(new RunIdIncrementer())
+                .listener(jobListener)
+                .start(partitionStep())
+                .build();
+    }
+
+    @Bean
+    public Step partitionStep() {
+        return stepBuilderFactory.get("partitionStep")
+                .partitioner("workerStep", filePartitioner)
+                .step(workerStep())
+                .gridSize(4)
+                .taskExecutor(new SimpleAsyncTaskExecutor())
+                .listener(stepListener)
+                .build();
+    }
+
+    @Bean
+    public Step workerStep() {
+        return stepBuilderFactory.get("workerStep")
+                .<String, String>chunk(1000)
+                .reader(fileReader)
+                .writer(comboWriter)
+                .listener(stepListener)
+                .build();
+    }
+}
+///////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+@Bean
+public Step crrawStep() {
+    return stepBuilderFactory.get("crrawStep")
+            .<String, String>chunk(1000)
+            .reader(fileReader) // your combo raw file reader
+            .writer(comboWriter)
+            .listener(stepListener)
+            .build();
+}
+
+@Bean
+public Step statsStep() {
+    return stepBuilderFactory.get("statsStep")
+            .tasklet((contribution, chunkContext) -> {
+                dTableStatsService.gatherStats(); // custom service logic
+                return RepeatStatus.FINISHED;
+            }).build();
+}
+
+@Bean
+public Step exportStep() {
+    return stepBuilderFactory.get("exportStep")
+            .tasklet((contribution, chunkContext) -> {
+                dExportsService.export(); // custom service logic
+                return RepeatStatus.FINISHED;
+            }).build();
+}
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+@Bean
+public Job dialETLJob(JobCompletionNotificationListener jobListener) {
+    return jobBuilderFactory.get("dialETLJob")
+            .incrementer(new RunIdIncrementer())
+            .listener(jobListener)
+            .start(crrawStep())      // Step 1
+            .next(statsStep())       // Step 2
+            .next(exportStep())      // Step 3
+            .build();
+}

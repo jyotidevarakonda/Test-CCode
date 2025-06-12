@@ -57,3 +57,133 @@ cd $DIAL
 #
 date >> $CONSOLDIR/diallog
 echo "--- Trap duplicated ENTSID's Completed ------" >> $CONSOLDIR/diallog
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+import java.io.*;
+import java.nio.file.*;
+import java.util.*;
+import java.util.stream.*;
+
+public class Consolidator {
+    static String CONSOLDIR = "/path/to/consoldir";
+    static List<String> dbpaths = Arrays.asList("db1", "db2"); // Example list; replace with actual paths
+    static String ALSDIR = "/path/to/alsdir"; // Base directory
+    static String DIAL = "/path/to/dial";
+
+    public static void main(String[] args) throws IOException {
+        log("--- Step #3 - Consolidate all data files to a common load area ---");
+
+        // Step 1: Clear existing consolidated files
+        Files.createDirectories(Paths.get(CONSOLDIR));
+        clearFiles(CONSOLDIR, Arrays.asList("DIAL*.dat", "MODELS.dat", "*.ctl", "*.log", "*.bad", "errlog"));
+
+        // Consolidate files
+        try (
+            BufferedWriter entWriter = new BufferedWriter(new FileWriter(CONSOLDIR + "/DIALENT.dat", true));
+            BufferedWriter modWriter = new BufferedWriter(new FileWriter(CONSOLDIR + "/DIALMOD.dat", true));
+            BufferedWriter sumWriter = new BufferedWriter(new FileWriter(CONSOLDIR + "/DIALSUM.dat", true));
+            BufferedWriter modelsWriter = new BufferedWriter(new FileWriter(CONSOLDIR + "/MODELS.dat", true));
+            BufferedWriter logWriter = new BufferedWriter(new FileWriter(CONSOLDIR + "/dialload.log", true))
+        ) {
+            for (String place : dbpaths) {
+                Path DIALDIR = Paths.get(ALSDIR, place, "DIALDIR");
+                if (!Files.isDirectory(DIALDIR)) continue;
+
+                logWriter.write("Processing: " + DIALDIR.toString() + "\n");
+
+                concatFiles(DIALDIR, "CFF??ent.????", entWriter, logWriter);
+                concatFiles(DIALDIR, "QUEUE??ent.????", entWriter, logWriter);
+                concatFiles(DIALDIR, "CFF??mod.????", modWriter, logWriter);
+                concatFiles(DIALDIR, "QUEUE??mod.????", modWriter, logWriter);
+                concatFiles(DIALDIR, "CFF??sum.????", sumWriter, logWriter);
+                concatFiles(DIALDIR, "QUEUE??sum.????", sumWriter, logWriter);
+                concatFiles(DIALDIR, "MODELS??.????", modelsWriter, logWriter);
+            }
+        }
+
+        log("Data consolidated to DIALENT.dat, DIALMOD.dat, DIALSUM.dat and MODELS.dat");
+        log("--- Consolidation of data files Completed ------------------------");
+
+        // Trap duplicate ENTSIDs
+        log("--- Step #3 - Trap duplicated ENTSID's ------");
+
+        Path dialentPath = Paths.get(CONSOLDIR, "DIALENT.dat");
+        List<String> entsids = Files.lines(dialentPath)
+                                    .map(line -> line.split("\\|")[0])
+                                    .collect(Collectors.toList());
+
+        Map<String, Long> duplicates = entsids.stream()
+                                              .collect(Collectors.groupingBy(s -> s, Collectors.counting()))
+                                              .entrySet().stream()
+                                              .filter(e -> e.getValue() > 1)
+                                              .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+
+        Path dupFile = Paths.get(CONSOLDIR, "dupENTSID");
+        Files.write(dupFile, duplicates.keySet());
+
+        if (!duplicates.isEmpty()) {
+            log(currentDate() + " - Step #3 - PROBLEM: Duplicate ENTSID'S");
+        } else {
+            log("No duplicated ENTSID's found");
+        }
+
+        log("--- Trap duplicated ENTSID's Completed ------");
+    }
+
+    private static void clearFiles(String dir, List<String> patterns) throws IOException {
+        for (String pattern : patterns) {
+            try (DirectoryStream<Path> stream = Files.newDirectoryStream(Paths.get(dir), pattern)) {
+                for (Path entry : stream) {
+                    Files.deleteIfExists(entry);
+                }
+            } catch (IOException ignored) {
+            }
+        }
+    }
+
+    private static void concatFiles(Path dir, String glob, BufferedWriter out, BufferedWriter logWriter) throws IOException {
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(dir, glob)) {
+            for (Path file : stream) {
+                logWriter.write("Adding: " + file.getFileName() + "\n");
+                Files.lines(file).forEach(line -> {
+                    try {
+                        out.write(line);
+                        out.newLine();
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+                });
+            }
+        } catch (IOException ignored) {
+        }
+    }
+
+    private static void log(String message) throws IOException {
+        String timestamp = currentDate();
+        try (BufferedWriter writer = new BufferedWriter(new FileWriter(CONSOLDIR + "/diallog", true))) {
+            writer.write(timestamp + " - " + message + "\n");
+        }
+    }
+
+    private static String currentDate() {
+        return java.time.LocalDateTime.now().toString();
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

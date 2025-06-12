@@ -1,0 +1,59 @@
+#!/bin/csh -f
+#=============================================================================
+# Dial3_consol: Consolidates all data files to a common load area. 
+#               Trap duplicate ENTSID's
+#
+# 12/15/97 (AJC) - Originally (Step #6/Step #7) of chkdial.csh created 8/11/97
+#                - Revised 02/13/98
+# 06/15/2015 (IM) - Added functionality to support MODELS data file
+#=============================================================================
+set nonomatch
+source DIAL.path
+#=============================================================================
+#  Step #3 - (Global) Consolidate all data files to a common load area
+#  c.inDIAL - 07/22/97 (annbro) Original Program Version 
+#=============================================================================
+echo "--- Step #3 - Consolidate all data files to a common load area ---" >> $CONSOLDIR/diallog
+date >> $CONSOLDIR/diallog
+#
+cd $CONSOLDIR
+/bin/rm DIAL*.dat MODELS.dat *.ctl *.log *.bad errlog >& /dev/null
+foreach place ($dbpath)
+	unsetenv DBPATH 
+	setenv DBPATH $ALSDIR/$place
+	setenv DIALDIR $ALSDIR/$place/DIALDIR
+	cd $DIALDIR
+	ls CFF??ent.???? >> $CONSOLDIR/dialload.log
+	ls QUEUE??ent.???? >> $CONSOLDIR/dialload.log
+	ls CFF??mod.???? >> $CONSOLDIR/dialload.log
+	ls QUEUE??mod.???? >> $CONSOLDIR/dialload.log
+        ls MODELS??.???? >> $CONSOLDIR/dialload.log
+        cat CFF??ent.???? >> $CONSOLDIR/DIALENT.dat
+	cat QUEUE??ent.???? >> $CONSOLDIR/DIALENT.dat
+	cat CFF??mod.???? >> $CONSOLDIR/DIALMOD.dat 
+	cat QUEUE??mod.???? >> $CONSOLDIR/DIALMOD.dat
+	cat CFF??sum.???? >> $CONSOLDIR/DIALSUM.dat
+	cat QUEUE??sum.???? >> $CONSOLDIR/DIALSUM.dat
+        cat MODELS??.???? >> $CONSOLDIR/MODELS.dat
+end
+echo "Data consolidated to DIALENT.dat, DIALMOD.dat, DIALSUM.dat and MODELS.dat" >> $CONSOLDIR/diallog
+date >> $CONSOLDIR/diallog
+echo "--- Consolidation of data files Completed ------------------------" >> $CONSOLDIR/diallog
+#=============================================================================
+#  Step #3 - TRAP DUPLICATE ENTSID'S (AJC) 8/15/97
+#=============================================================================
+echo "--- Step #3 - Trap duplicated ENTSID's ------" >> $CONSOLDIR/diallog
+date >> $CONSOLDIR/diallog
+#
+cd $CONSOLDIR
+cut -d \| -f1 DIALENT.dat | sort | uniq -d > dupENTSID
+if ( ! -z dupENTSID) then 
+	echo "`date +%m/%d/%Y` - Step #3 - PROBLEM: Duplicate ENTSID'S" >> $CONSOLDIR/diallog
+else
+	echo "No duplicated ENTSID's found" >> $CONSOLDIR/diallog
+endif
+#=============================================================================
+cd $DIAL
+#
+date >> $CONSOLDIR/diallog
+echo "--- Trap duplicated ENTSID's Completed ------" >> $CONSOLDIR/diallog

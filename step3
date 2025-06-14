@@ -171,6 +171,47 @@ public class Consolidator {
 }
 
 
+///////////////////////////////////////////////////////////////////////
+
+
+import java.sql.*;
+
+public class OracleIndexDropper {
+
+    public static void dropIndexIfExists(Connection conn, String indexName, String schema) throws SQLException {
+        String checkSql = "SELECT COUNT(*) FROM ALL_INDEXES WHERE INDEX_NAME = ? AND OWNER = ?";
+        String dropSql = "DROP INDEX " + schema + "." + indexName;
+
+        try (
+            PreparedStatement checkStmt = conn.prepareStatement(checkSql)
+        ) {
+            checkStmt.setString(1, indexName.toUpperCase());
+            checkStmt.setString(2, schema.toUpperCase());
+
+            ResultSet rs = checkStmt.executeQuery();
+            if (rs.next() && rs.getInt(1) > 0) {
+                try (Statement dropStmt = conn.createStatement()) {
+                    dropStmt.executeUpdate(dropSql);
+                    System.out.println("Index dropped: " + schema + "." + indexName);
+                } catch (SQLException e) {
+                    System.err.println("Failed to drop index: " + e.getMessage());
+                    throw e;
+                }
+            } else {
+                System.out.println("Index does not exist: " + schema + "." + indexName);
+            }
+        }
+    }
+}
+
+\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+try (Connection conn = DriverManager.getConnection(DB_URL, USER, PASSWORD)) {
+    OracleIndexDropper.dropIndexIfExists(conn, "IDX_EMP_NAME", "HR");
+} catch (SQLException e) {
+    e.printStackTrace();
+}
+
+
 
 
 

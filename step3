@@ -224,6 +224,68 @@ try {
 }
 
 
+////////////////////////////////////////////////////////
+
+import org.springframework.jdbc.core.JdbcTemplate;
+
+import java.sql.Connection;
+import java.sql.SQLException;
+import java.sql.Statement;
+
+public class ConstraintBatchProcessor {
+
+    private final JdbcTemplate jdbcTemplate;
+
+    public ConstraintBatchProcessor(JdbcTemplate jdbcTemplate) {
+        this.jdbcTemplate = jdbcTemplate;
+    }
+
+    public void processConstraintsBatch() throws SQLException {
+        try (Connection conn = jdbcTemplate.getDataSource().getConnection();
+             Statement stmt = conn.createStatement()) {
+
+            // 1. Check if constraint already exists
+            String tableName = "DIALENT";
+            String constraintName = "ENT_FK";
+            boolean exists = constraintExists(tableName, constraintName);
+
+            // 2. Add to batch if not present
+            if (!exists) {
+                stmt.addBatch("""
+                    ALTER TABLE dial.DIALENT
+                    ADD CONSTRAINT ENT_FK
+                    FOREIGN KEY (ENTDID)
+                    REFERENCES dial.coredial(CORESID)
+                    """);
+                System.out.println("Added ENT_FK to batch.");
+            } else {
+                System.out.println("ENT_FK already exists. Skipping.");
+            }
+
+            // 3. Add more SQL to batch if needed
+            // stmt.addBatch(...);
+
+            // 4. Execute the batch
+            stmt.executeBatch();
+            System.out.println("Batch executed.");
+
+        }
+    }
+
+    private boolean constraintExists(String tableName, String constraintName) {
+        String sql = """
+            SELECT COUNT(*) FROM user_constraints
+            WHERE table_name = ? AND constraint_name = ?
+        """;
+        Integer count = jdbcTemplate.queryForObject(
+            sql, Integer.class,
+            tableName.toUpperCase(), constraintName.toUpperCase()
+        );
+        return count != null && count > 0;
+    }
+}
+
+
 
 
 

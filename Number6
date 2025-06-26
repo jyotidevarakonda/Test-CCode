@@ -1,0 +1,29 @@
+#!/bin/csh
+#=============================================================================
+# 11/15/2001 (AJC) -  Dial6_risk: Runs Quickhits
+#=============================================================================
+set nonomatch
+set nohup
+source DIAL.path
+#=============================================================================
+# Run runrisk.csh
+#=============================================================================
+echo "--- Step #6 - Run Dial6_risk --" >> $CONSOLDIR/diallog
+date >> $CONSOLDIR/diallog
+#
+set cnt = 0
+
+foreach area ($dbpath)
+	set ao = `echo $area | cut -c2,3`
+ 	if ($cnt == 5 || $cnt == 10 || $cnt == 15 || $cnt == 20) then
+        wait 
+	endif
+	(nohup $DIAL/runrisk.csh $ao >& /tmp/mess) &
+	set cnt = `expr $cnt + 1`
+	shift area
+end
+#
+wait
+date >> $CONSOLDIR/diallog
+echo "--- Dial6_risk Completed ------" >> $CONSOLDIR/diallog
+#------------------------------------------------------------------------------

@@ -27,3 +27,14 @@ wait
 date >> $CONSOLDIR/diallog
 echo "--- Dial6_risk Completed ------" >> $CONSOLDIR/diallog
 #------------------------------------------------------------------------------
+
+
+#!/bin/csh -f
+source DIAL.path
+set pswd = `/als-ALS/app/execloc/d.common/Decipherit dial`
+sqlplus -s /nolog << EOF >>& $CONSOLDIR/diallog
+connect dial/${pswd} 
+set timing on
+@combo_risk.sql $argv[1] 70 70 
+EOF
+
